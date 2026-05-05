@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fraud Monitoring Dashboard</title>
+
+<!-- Font Awesome for home icon -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+    // Tailwind config
+    tailwind.config = {
+        darkMode: 'class'
+    }
+</script>
+
+<style>
+    /* Smooth transition for theme toggle */
+    * {
+        transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+    
+    /* Home link styling */
+    .home-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background-color: #4f46e5;
+        color: white;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+    
+    .home-link:hover {
+        background-color: #4338ca;
+        transform: scale(1.05);
+    }
+    
+    .dark .home-link {
+        background-color: #6366f1;
+    }
+    
+    .dark .home-link:hover {
+        background-color: #4f46e5;
+    }
+    
+    /* Active challenge status colors */
+    .active-challenge-pending {
+        color: #f59e0b;
+    }
+    .active-challenge-passed {
+        color: #10b981;
+    }
+    .active-challenge-failed {
+        color: #ef4444;
+        font-weight: bold;
+    }
+</style>
+</head>
+
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen p-6">
+<div class="max-w-7xl mx-auto">
+
+<!-- Header with Home link -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Fraud Monitoring Dashboard</h1>
+        <p class="text-sm text-gray-500">Real-time identity verification monitoring</p>
+    </div>
+    <div class="flex items-center gap-4 w-full md:w-auto">
+        <!-- Home Link Button -->
+        <a href="/" class="home-link">
+            <i class="fas fa-home"></i>
+            <span class="hidden sm:inline">Home</span>
+        </a>
+        <span id="refreshStatus" class="text-xs text-gray-400">Refreshing...</span>
+        <button id="themeToggle" class="bg-white dark:bg-gray-700 px-4 py-2 rounded shadow hover:scale-105 transition">🌙</button>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+<div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow">
+<p class="text-sm text-gray-500">Total Verifications</p>
+<h2 id="total" class="text-3xl font-bold text-indigo-600 mt-2">0</h2>
+</div>
+<div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow">
+<p class="text-sm text-gray-500">Successful</p>
+<h2 id="success" class="text-3xl font-bold text-green-600 mt-2">0</h2>
+</div>
+<div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow">
+<p class="text-sm text-gray-500">Failed</p>
+<h2 id="failed" class="text-3xl font-bold text-red-600 mt-2">0</h2>
+</div>
+<div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow">
+<p class="text-sm text-gray-500">Fraud Alerts</p>
+<h2 id="alerts" class="text-3xl font-bold text-yellow-500 mt-2">0</h2>
+</div>
+</div>
+
+<!-- Fraud Rate -->
+<div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow mb-8">
+<div class="flex justify-between items-center mb-3">
+<h3 class="font-semibold text-gray-700 dark:text-white">Fraud Detection Rate</h3>
+<span id="fraudRateText" class="text-sm text-gray-500">0%</span>
+</div>
+<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+<div id="fraudRateBar" class="bg-red-500 h-3 rounded-full transition-all" style="width:0%"></div>
+</div>
+</div>
+
+<!-- Logs -->
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
+<div class="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+<h3 class="font-semibold text-gray-700 dark:text-white">Recent Verification Logs</h3>
+<span class="text-xs text-gray-400">Live feed</span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-sm">
+<thead class="bg-gray-50 dark:bg-gray-700">
+<tr class="text-left">
+<th class="p-3">Email</th>
+<th class="p-3">Status</th>
+<th class="p-3">Active Challenge</th>
+<th class="p-3">Similarity</th>
+<th class="p-3">Risk Score</th>
+<th class="p-3">Time</th>
+</tr>
+</thead>
+<tbody id="logs"></tbody>
+</table>
+</div>
+</div>
+
+<!-- Footer with navigation links -->
+<footer class="mt-8 pt-6 border-t dark:border-gray-700">
+    <div class="flex flex-col md:flex-row justify-between items-center text-sm text-gray-500 dark:text-gray-400">
+        <p>Fraud Detection System • Real-time Monitoring</p>
+        <div class="flex gap-6 mt-2 md:mt-0">
+            <a href="/" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition">Home</a>
+            <a href="/enroll" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition">Enroll</a>
+            <a href="/verify" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition">Verify</a>
+            <a href="/dashboard" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition font-semibold text-indigo-600 dark:text-indigo-400">Dashboard</a>
+        </div>
+    </div>
+</footer>
+
+</div>
+
+<script>
+/* ---------------------- */
+/* Theme toggle - FIXED */
+/* ---------------------- */
+(function() {
+    const toggle = document.getElementById("themeToggle");
+    const savedTheme = localStorage.getItem("theme");
+    
+    if(savedTheme === "dark") {
+        document.documentElement.classList.add("dark");
+        if(toggle) toggle.textContent = "☀️";
+    } else {
+        document.documentElement.classList.remove("dark");
+        if(toggle) toggle.textContent = "🌙";
+    }
+    
+    if(toggle) {
+        toggle.onclick = function() {
+            document.documentElement.classList.toggle("dark");
+            const isDark = document.documentElement.classList.contains("dark");
+            localStorage.setItem("theme", isDark ? "dark" : "light");
+            toggle.textContent = isDark ? "☀️" : "🌙";
+        };
+    }
+})();
+
+/* ---------------------- */
+/* Status color helper */
+/* ---------------------- */
+function statusColor(status){
+    status = String(status).toLowerCase();
+    
+    if(status.includes("verified") || status.includes("success") || status.includes("complete")){
+        return "text-green-600";
+    }
+    if(status.includes("spoof") || status.includes("deepfake") || status.includes("blocked")){
+        return "text-red-600";
+    }
+    if(status.includes("rejected")){
+        return "text-yellow-500";
+    }
+    if(status.includes("requires_active_failed")){
+        return "text-red-600 font-bold";  // Failed challenges show as red
+    }
+    if(status.includes("requires_active")){
+        return "text-orange-500";
+    }
+    if(status.includes("error")){
+        return "text-orange-500";
+    }
+    return "text-gray-500";
+}
+
+/* ---------------------- */
+/* Active challenge status helper - PROFESSIONAL */
+/* ---------------------- */
+function getActiveChallengeStatus(status, details) {
+    status = String(status).toLowerCase();
+    
+    // Parse details if it's a string
+    let detailsObj = null;
+    if (details && typeof details === 'string') {
+        try {
+            detailsObj = JSON.parse(details);
+        } catch (e) {
+            detailsObj = null;
+        }
+    } else if (details && typeof details === 'object') {
+        detailsObj = details;
+    }
+    
+    // CASE 1: Active Challenge FAILED (explicit status)
+    if (status.includes("active_challenge_failed") || status.includes("requires_active_failed")) {
+        return {
+            text: "Failed",
+            class: "active-challenge-failed",
+            icon: "❌"
+        };
+    }
+    
+    // CASE 2: Active Challenge PASSED (from details)
+    if (detailsObj) {
+        if (detailsObj.active_challenge === "passed" || detailsObj.challenge_completed === true) {
+            return {
+                text: "Passed",
+                class: "active-challenge-passed",
+                icon: "✅"
+            };
+        }
+        if (detailsObj.active_challenge === "failed" || detailsObj.challenge_completed === false) {
+            return {
+                text: "Failed",
+                class: "active-challenge-failed",
+                icon: "❌"
+            };
+        }
+    }
+    
+    // CASE 3: Status indicates active challenge was triggered (pending)
+    if (status.includes("requires_active") && !status.includes("failed")) {
+        return {
+            text: "Pending",
+            class: "active-challenge-pending",
+            icon: "⏳"
+        };
+    }
+    
+    // CASE 4: Verified after active challenge
+    if (status.includes("verified") || status.includes("success")) {
+        if (detailsObj && (detailsObj.active_challenge === "passed" || detailsObj.challenge_completed === true)) {
+            return {
+                text: "Passed",
+                class: "active-challenge-passed",
+                icon: "✅"
+            };
+        }
+        // Passive approval (no active challenge)
+        return {
+            text: "—",
+            class: "text-gray-400",
+            icon: ""
+        };
+    }
+    
+    // No active challenge
+    return {
+        text: "—",
+        class: "text-gray-400",
+        icon: ""
+    };
+}
+
+/* ---------------------- */
+/* Dashboard loader */
+/* ---------------------- */
+async function loadDashboard(){
+    document.getElementById("refreshStatus").textContent = "Refreshing...";
+    
+    try{
+        const res = await fetch("/api/dashboard");
+        const data = await res.json();
+
+        /* Stats */
+        const total = data.total || 0;
+        const success = data.success || 0;
+        const failed = data.failed || 0;
+        const alerts = data.alerts || 0;
+
+        document.getElementById("total").textContent = total;
+        document.getElementById("success").textContent = success;
+        document.getElementById("failed").textContent = failed;
+        document.getElementById("alerts").textContent = alerts;
+
+        /* Fraud rate */
+        let fraudRate = 0;
+        if(total > 0){
+            fraudRate = ((failed + alerts) / total) * 100;
+            fraudRate = Math.min(100, Math.max(0, fraudRate));
+        }
+        
+        document.getElementById("fraudRateBar").style.width = fraudRate + "%";
+        document.getElementById("fraudRateText").textContent = fraudRate.toFixed(1) + "%";
+
+        /* Logs */
+        const logs = document.getElementById("logs");
+        logs.innerHTML = "";
+
+        if(!data.logs || data.logs.length === 0){
+            logs.innerHTML = `
+                <tr>
+                    <td colspan="6" class="p-6 text-center text-gray-400">
+                        No verification logs yet
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        data.logs.forEach(log => {
+            const similarity = log.similarity ? (log.similarity * 100).toFixed(1) : "0.0";
+            const riskScore = log.risk_score || "0";
+            
+            const fraudClass = log.is_fraud ? 'bg-red-100 dark:bg-red-900 font-bold' : '';
+            const fraudEmoji = log.is_fraud ? ' 🚨' : '';
+            
+            // Get active challenge status
+            const challengeStatus = getActiveChallengeStatus(log.status, log.details);
+            
+            logs.innerHTML += `
+                <tr class="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition ${fraudClass}">
+                    <td class="p-3">${log.email || 'unknown'}</td>
+                    <td class="p-3 font-semibold ${statusColor(log.status)}">
+                        ${log.status}${fraudEmoji}
+                    </td>
+                    <td class="p-3">
+                        <span class="${challengeStatus.class}">
+                            ${challengeStatus.icon} ${challengeStatus.text}
+                        </span>
+                    </td>
+                    <td class="p-3">
+                        ${similarity}%
+                    </td>
+                    <td class="p-3">
+                        ${riskScore}
+                    </td>
+                    <td class="p-3 text-gray-400">
+                        ${log.created_at || 'N/A'}
+                    </td>
+                </tr>
+            `;
+        });
+
+    } catch(err){
+        console.error("Dashboard error", err);
+        document.getElementById("logs").innerHTML = `
+            <tr>
+                <td colspan="6" class="p-6 text-center text-red-500">
+                    Error loading dashboard data
+                </td>
+            </tr>
+        `;
+    }
+    
+    document.getElementById("refreshStatus").textContent = "Updated";
+}
+
+/* Initial load */
+loadDashboard();
+
+/* Auto refresh every 10 seconds */
+setInterval(loadDashboard, 10000);
+</script>
+
+</body>
+</html>

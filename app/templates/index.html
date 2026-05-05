@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>AI Fraud Detection System</title>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Font Awesome for hamburger icon -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+<style>
+    /* Active link highlighting */
+    .nav-link.active {
+        color: #4f46e5 !important;
+        font-weight: 600;
+        border-bottom: 2px solid #4f46e5;
+    }
+    
+    .dark .nav-link.active {
+        color: #818cf8 !important;
+        border-bottom-color: #818cf8;
+    }
+    
+    /* Mobile menu transitions */
+    #mobile-menu {
+        transition: all 0.3s ease-in-out;
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+    }
+    
+    #mobile-menu.open {
+        max-height: 400px;
+        opacity: 1;
+        margin-top: 1rem;
+    }
+    
+    /* Smooth hover effects */
+    .nav-link {
+        transition: all 0.2s ease;
+        position: relative;
+    }
+    
+    .nav-link:hover {
+        color: #4f46e5;
+    }
+    
+    .dark .nav-link:hover {
+        color: #818cf8;
+    }
+    
+    /* Home link special styling */
+    .home-link {
+        background-color: #4f46e5;
+        color: white !important;
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+    }
+    
+    .home-link:hover {
+        background-color: #4338ca;
+        color: white !important;
+    }
+    
+    .dark .home-link {
+        background-color: #6366f1;
+    }
+    
+    .dark .home-link:hover {
+        background-color: #4f46e5;
+    }
+</style>
+
+</head>
+
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen flex flex-col">
+
+<!-- Navbar -->
+<header class="bg-indigo-700 text-white shadow-lg">
+    <div class="max-w-6xl mx-auto px-6 py-4">
+        <div class="flex justify-between items-center">
+            <!-- Logo that links to home -->
+            <a href="/" class="text-xl font-bold hover:text-indigo-200 transition">AI Fraud Detection</a>
+            
+            <!-- Desktop Navigation -->
+            <nav class="hidden md:flex items-center space-x-6">
+                <a href="/" class="nav-link hover:underline" id="nav-home">Home</a>
+                <a href="/enroll" class="nav-link hover:underline" id="nav-enroll">Enroll</a>
+                <a href="/verify" class="nav-link hover:underline" id="nav-verify">Verify</a>
+                <a href="/dashboard" class="nav-link hover:underline" id="nav-dashboard">Dashboard</a>
+            </nav>
+            
+            <!-- Mobile Menu Button (Three lines) -->
+            <button id="menu-btn" class="md:hidden text-white focus:outline-none">
+                <i class="fas fa-bars text-2xl"></i>
+            </button>
+        </div>
+        
+        <!-- Mobile Navigation Menu -->
+        <div id="mobile-menu" class="md:hidden">
+            <div class="flex flex-col space-y-3 py-3">
+                <a href="/" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-home">
+                    <i class="fas fa-home mr-2"></i>Home
+                </a>
+                <a href="/enroll" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-enroll">
+                    <i class="fas fa-user-plus mr-2"></i>Enroll
+                </a>
+                <a href="/verify" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-verify">
+                    <i class="fas fa-check-circle mr-2"></i>Verify
+                </a>
+                <a href="/dashboard" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-dashboard">
+                    <i class="fas fa-chart-line mr-2"></i>Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</header>
+
+
+<!-- Hero Section -->
+<section class="flex-grow flex items-center justify-center">
+
+<div class="max-w-4xl text-center px-6">
+
+<h2 class="text-4xl font-bold text-gray-800 dark:text-white mb-4">
+Fraud Detection Using Facial Recognition
+</h2>
+
+<p class="text-gray-600 dark:text-gray-300 text-lg mb-6">
+A secure identity verification system using
+<strong>facial recognition</strong> and
+<strong>deepfake-resistant liveness detection</strong>.
+</p>
+
+<p class="text-gray-500 dark:text-gray-400 mb-10">
+The system protects against spoofing attacks such as photos,
+videos, and deepfakes by analyzing facial embeddings,
+motion signals, and passive liveness indicators.
+</p>
+
+<div class="flex flex-wrap justify-center gap-6">
+
+<a href="/enroll"
+class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-lg shadow-lg text-lg">
+Enroll Face
+</a>
+
+<a href="/verify"
+class="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-lg shadow-lg text-lg">
+Verify Identity
+</a>
+
+<a href="/dashboard"
+class="bg-gray-800 hover:bg-gray-900 text-white px-8 py-4 rounded-lg shadow-lg text-lg">
+System Dashboard
+</a>
+
+</div>
+
+</div>
+
+</section>
+
+
+<!-- Features -->
+<section class="bg-white dark:bg-gray-800 py-16">
+
+<div class="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-10 text-center">
+
+<div>
+<h3 class="text-xl font-semibold mb-2 text-gray-800 dark:text-white">Facial Recognition</h3>
+<p class="text-gray-600 dark:text-gray-300">
+Uses FaceNet deep learning embeddings to accurately match
+user identities during verification.
+</p>
+<div class="mt-4">
+<a href="/enroll" class="text-indigo-600 dark:text-indigo-400 hover:underline">Get started →</a>
+</div>
+</div>
+
+<div>
+<h3 class="text-xl font-semibold mb-2 text-gray-800 dark:text-white">Deepfake-Resistant Liveness</h3>
+<p class="text-gray-600 dark:text-gray-300">
+Detects real human presence using passive liveness signals,
+motion patterns, and anti-spoofing analysis.
+</p>
+<div class="mt-4">
+<a href="/verify" class="text-indigo-600 dark:text-indigo-400 hover:underline">Try it now →</a>
+</div>
+</div>
+
+<div>
+<h3 class="text-xl font-semibold mb-2 text-gray-800 dark:text-white">Fraud Risk Detection</h3>
+<p class="text-gray-600 dark:text-gray-300">
+Identifies suspicious activity and prevents identity fraud,
+photo attacks, and replay attacks.
+</p>
+<div class="mt-4">
+<a href="/dashboard" class="text-indigo-600 dark:text-indigo-400 hover:underline">View dashboard →</a>
+</div>
+</div>
+
+</div>
+
+</section>
+
+
+<!-- Footer - NO LINKS (just copyright) -->
+<footer class="bg-gray-900 dark:bg-gray-950 text-gray-400 text-center py-6">
+    <div class="max-w-6xl mx-auto px-6">
+        <p class="mb-2">AI Fraud Detection System • Final Year Project</p>
+        <p class="text-xs text-gray-600 dark:text-gray-500">© 2026 All rights reserved</p>
+    </div>
+</footer>
+
+<script>
+// Mobile menu toggle
+const menuBtn = document.getElementById('menu-btn');
+const mobileMenu = document.getElementById('mobile-menu');
+
+if (menuBtn) {
+    menuBtn.addEventListener('click', () => {
+        mobileMenu.classList.toggle('open');
+        
+        // Change icon when menu is open
+        const icon = menuBtn.querySelector('i');
+        if (mobileMenu.classList.contains('open')) {
+            icon.classList.remove('fa-bars');
+            icon.classList.add('fa-times');
+        } else {
+            icon.classList.remove('fa-times');
+            icon.classList.add('fa-bars');
+        }
+    });
+}
+
+// Highlight active navigation link based on current URL
+function highlightActiveLink() {
+    const currentPath = window.location.pathname;
+    
+    // Desktop navigation
+    const navLinks = {
+        '/': ['nav-home', 'mobile-nav-home'],
+        '/enroll': ['nav-enroll', 'mobile-nav-enroll'],
+        '/verify': ['nav-verify', 'mobile-nav-verify'],
+        '/dashboard': ['nav-dashboard', 'mobile-nav-dashboard']
+    };
+    
+    // Remove active class from all links first
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    
+    // Add active class to current page links
+    for (const [path, ids] of Object.entries(navLinks)) {
+        if (currentPath === path) {
+            ids.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.classList.add('active');
+                }
+            });
+            break;
+        }
+    }
+}
+
+// Run on page load
+highlightActiveLink();
+
+// Close mobile menu when clicking a link (optional)
+document.querySelectorAll('#mobile-menu a').forEach(link => {
+    link.addEventListener('click', () => {
+        mobileMenu.classList.remove('open');
+        const icon = menuBtn.querySelector('i');
+        icon.classList.remove('fa-times');
+        icon.classList.add('fa-bars');
+    });
+});
+</script>
+
+</body>
+</html>

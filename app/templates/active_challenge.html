@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Liveness Challenge</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .card { max-width: 500px; margin: 2rem auto; padding: 2rem; text-align: center; position: relative; }
+        #instruction { font-size: 1.3rem; font-weight: bold; margin: 1.5rem 0; min-height: 4rem; }
+        #feedback { font-size: 1.1rem; min-height: 3rem; margin: 1rem 0; font-weight: bold; line-height: 1.5; }
+        
+        /* Steps progress */
+        #steps { display: flex; justify-content: center; gap: 0.8rem; margin: 1rem 0; }
+        .step-dot {
+            width: 12px; height: 12px; border-radius: 50%;
+            background: #ccc; transition: all 0.3s;
+            position: relative;
+        }
+        .step-dot.active { background: #0066cc; transform: scale(1.3); }
+        .step-dot.completed { background: #28a745; }
+        .step-dot.failed { background: #dc3545; }
+        
+        /* Timer bar */
+        #timer-container {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+        #timer-bar {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #4CAF50, #FFC107, #F44336);
+            transition: width 0.1s linear;
+            border-radius: 4px;
+        }
+        #timer-text {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+            font-weight: bold;
+        }
+        
+        /* Video container */
+        .video-container {
+            position: relative;
+            display: inline-block;
+        }
+        #video { 
+            width: 100%; 
+            max-width: 480px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: block;
+        }
+        .direction-arrow {
+            position: absolute;
+            font-size: 4rem;
+            color: #0066cc;
+            opacity: 0.8;
+            animation: pulse 1.5s infinite;
+            z-index: 10;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+        .arrow-up {
+            left: 50%;
+            top: -60px;
+            transform: translateX(-50%) rotate(-90deg);
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.5; transform: translateY(-50%) scale(1); }
+            50% { opacity: 1; transform: translateY(-50%) scale(1.1); }
+            100% { opacity: 0.5; transform: translateY(-50%) scale(1); }
+        }
+        
+        #nextBtn {
+            margin-top: 20px;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        #nextBtn:hover:not(:disabled) {
+            background: #0052a3;
+            transform: scale(1.05);
+        }
+        #nextBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        #nextBtn.loading::after {
+            content: "…";
+            animation: dots 1.5s infinite;
+        }
+        
+        #reset-counter {
+            font-size: 1rem;
+            color: #dc3545;
+            margin-top: 15px;
+            font-weight: bold;
+            padding: 8px;
+            border-radius: 20px;
+            background: #ffeeee;
+        }
+        
+        #result {
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        
+        @keyframes dots { 0%, 20% { content: "."; } 40% { content: ".."; } 60% { content: "..."; } }
+        
+        @media (max-width: 600px) {
+            .arrow-up { top: -40px; font-size: 2.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+
+    <div class="card">
+        <h2>Active Verification Challenge</h2>
+        
+        <!-- Step progress dots -->
+        <div id="steps"></div>
+        
+        <!-- Timer -->
+        <div id="timer-container">
+            <div id="timer-bar"></div>
+        </div>
+        <div id="timer-text">Time for this step: <span id="time-left">10</span>s</div>
+        
+        <!-- Instruction -->
+        <p id="instruction">Initializing camera...</p>
+        <p id="feedback"></p>
+        
+        <!-- Video with direction arrow (only for nod step) -->
+        <div class="video-container">
+            <video id="video" autoplay playsinline muted aria-label="Live camera preview"></video>
+            <div id="direction-arrow" class="direction-arrow"></div>
+        </div>
+        
+        <!-- Reset counter -->
+        <div id="reset-counter">Resets: 0/3</div>
+        
+        <!-- Button -->
+        <button id="nextBtn" class="primary" disabled>Start Challenge</button>
+        
+        <!-- Result message -->
+        <p id="result" aria-live="polite"></p>
+    </div>
+
+    <canvas id="canvas" style="display:none;" width="640" height="480"></canvas>
+
+    <script>
+    (async function() {
+        "use strict";
+
+        // SIMPLE CHALLENGES - Easy to understand
+        const CHALLENGES = [
+            { 
+                text: "OPEN YOUR MOUTH WIDE for 2 seconds", 
+                type: "mouth", 
+                arrow: "👄", 
+                arrowClass: "",
+                showArrow: false 
+            },
+            { 
+                text: "Nod your head DOWN and UP slowly", 
+                type: "nod", 
+                arrow: "↓↑", 
+                arrowClass: "arrow-up",
+                showArrow: true 
+            },
+            { 
+                text: "SMILE WIDE (show your teeth)", 
+                type: "smile", 
+                arrow: "😁", 
+                arrowClass: "",
+                showArrow: false 
+            },
+            { 
+                text: "BLINK your eyes SLOWLY and CLEARLY twice", 
+                type: "blink", 
+                arrow: "👁️", 
+                arrowClass: "",
+                showArrow: false 
+            }
+        ];
+
+        // Timer constants
+        const STEP_TIME_LIMIT = 10; // 10 seconds per step
+        const MAX_RESETS = 3; // max number of full resets
+        
+        // DOM elements
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const nextBtn = document.getElementById("nextBtn");
+        const instruction = document.getElementById("instruction");
+        const feedback = document.getElementById("feedback");
+        const resultEl = document.getElementById("result");
+        const stepsEl = document.getElementById("steps");
+        const timerBar = document.getElementById("timer-bar");
+        const timeLeftSpan = document.getElementById("time-left");
+        const resetCounter = document.getElementById("reset-counter");
+        const directionArrow = document.getElementById("direction-arrow");
+
+        // Get email from URL
+        const urlParams = new URLSearchParams(location.search);
+        const email = urlParams.get("email") || "";
+
+        // State variables
+        let currentStep = 0;
+        let totalResets = 0;
+        let stepStartTime = null;
+        let timerInterval = null;
+        let isProcessing = false;
+        let stream = null;
+        let challengeActive = false;
+        let challengeStarted = false;
+
+        // Theme persistence
+        const currentTheme = localStorage.getItem("theme") || "light";
+        document.documentElement.setAttribute("data-theme", currentTheme);
+        document.querySelector(".theme-toggle").textContent = currentTheme === "dark" ? "☀️" : "🌙";
+
+        document.querySelector(".theme-toggle").addEventListener("click", () => {
+            const newTheme = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+            document.documentElement.setAttribute("data-theme", newTheme);
+            localStorage.setItem("theme", newTheme);
+            document.querySelector(".theme-toggle").textContent = newTheme === "dark" ? "☀️" : "🌙";
+        });
+
+        // Initialize step dots
+        CHALLENGES.forEach((_, i) => {
+            const dot = document.createElement("div");
+            dot.className = "step-dot" + (i === 0 ? " active" : "");
+            stepsEl.appendChild(dot);
+        });
+
+        // Update progress dots
+        function updateProgress() {
+            document.querySelectorAll(".step-dot").forEach((dot, i) => {
+                dot.className = "step-dot" +
+                    (i < currentStep ? " completed" : i === currentStep ? " active" : "");
+            });
+        }
+
+        // Update direction arrow based on current step
+        function updateArrow() {
+            const challenge = CHALLENGES[currentStep];
+            if (challenge.showArrow) {
+                directionArrow.className = `direction-arrow ${challenge.arrowClass}`;
+                directionArrow.textContent = challenge.arrow;
+                directionArrow.style.display = "block";
+            } else {
+                directionArrow.style.display = "none";
+            }
+        }
+
+        // Update instruction text
+        function updateInstruction() {
+            instruction.textContent = CHALLENGES[currentStep].text;
+        }
+
+        // Update reset counter display
+        function updateResetCounter() {
+            resetCounter.textContent = `Resets: ${totalResets}/${MAX_RESETS}`;
+            if (totalResets >= MAX_RESETS) {
+                resetCounter.style.background = "#ffcccc";
+                resetCounter.style.color = "#cc0000";
+            }
+        }
+
+        // Timer functions
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            
+            stepStartTime = Date.now();
+            
+            timerInterval = setInterval(() => {
+                if (!challengeActive || !challengeStarted) return;
+                
+                const elapsed = (Date.now() - stepStartTime) / 1000;
+                const remaining = Math.max(0, STEP_TIME_LIMIT - elapsed);
+                const percent = (remaining / STEP_TIME_LIMIT) * 100;
+                
+                timerBar.style.width = `${percent}%`;
+                timeLeftSpan.textContent = Math.ceil(remaining);
+                
+                if (remaining < 3) {
+                    timerBar.style.background = "#F44336";
+                } else if (remaining < 6) {
+                    timerBar.style.background = "#FFC107";
+                } else {
+                    timerBar.style.background = "linear-gradient(90deg, #4CAF50, #FFC107, #F44336)";
+                }
+                
+                if (remaining <= 0 && !isProcessing) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                    handleTimeout();
+                }
+            }, 100);
+        }
+
+        function resetTimer() {
+            stepStartTime = Date.now();
+            timerBar.style.width = "100%";
+            timerBar.style.background = "linear-gradient(90deg, #4CAF50, #FFC107, #F44336)";
+            timeLeftSpan.textContent = STEP_TIME_LIMIT;
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        // Log final failure to server
+        async function logFinalFailure(reason) {
+            try {
+                await fetch("/api/active-challenge-final", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        email: email, 
+                        reason: reason
+                    })
+                });
+                console.log("Final failure logged:", reason);
+            } catch (err) {
+                console.error("Failed to log final failure:", err);
+            }
+        }
+
+        // Handle timeout
+        function handleTimeout() {
+            if (isProcessing || !challengeActive) return;
+            
+            isProcessing = true;
+            totalResets++;
+            updateResetCounter();
+            
+            if (totalResets >= MAX_RESETS) {
+                setFeedback(`❌ Too many timeouts (${MAX_RESETS}/${MAX_RESETS}). Challenge failed.`, false);
+                setResult("Redirecting to home page...", "error");
+                
+                document.querySelectorAll(".step-dot").forEach(dot => {
+                    dot.className = "step-dot failed";
+                });
+                
+                challengeActive = false;
+                challengeStarted = false;
+                nextBtn.style.display = "none";
+                stopTimer();
+                
+                logFinalFailure("Challenge timeout - max resets exceeded");
+                
+                setTimeout(() => {
+                    window.location.href = "/";
+                }, 3000);
+                
+                return;
+            }
+            
+            currentStep = 0;
+            updateProgress();
+            updateInstruction();
+            updateArrow();
+            
+            setFeedback(`⏰ TIME EXPIRED! Restarting from step 1. Reset ${totalResets}/${MAX_RESETS}`, false);
+            
+            resetTimer();
+            startTimer();
+            
+            isProcessing = false;
+        }
+
+        function setFeedback(text, isSuccess = false) {
+            feedback.textContent = text;
+            feedback.style.color = isSuccess ? "#28a745" : "#dc3545";
+        }
+
+        function setResult(text, className = "") {
+            resultEl.textContent = text;
+            resultEl.className = className;
+        }
+
+        function setButtonLoading(isLoading) {
+            if (isLoading) {
+                nextBtn.classList.add("loading");
+                nextBtn.disabled = true;
+            } else {
+                nextBtn.classList.remove("loading");
+                nextBtn.disabled = false;
+            }
+        }
+
+        // Start camera
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+            });
+            video.srcObject = stream;
+            await new Promise(r => video.onloadedmetadata = r);
+            
+            challengeActive = true;
+            updateInstruction();
+            updateArrow();
+            setFeedback("Camera ready. Click 'Start Challenge' to begin.");
+            nextBtn.disabled = false;
+            updateResetCounter();
+            
+        } catch (err) {
+            console.error("Camera error:", err);
+            instruction.textContent = "Camera access denied or unavailable.";
+            setFeedback("Please allow camera access and refresh the page.", false);
+            return;
+        }
+
+        // Prevent accidental navigation
+        window.addEventListener("beforeunload", (e) => {
+            if (challengeActive && challengeStarted && currentStep < CHALLENGES.length - 1) {
+                e.preventDefault();
+                e.returnValue = "Are you sure you want to leave the challenge?";
+            }
+        });
+
+        // Next button handler
+        nextBtn.addEventListener("click", async () => {
+            if (isProcessing) return;
+            
+            if (!challengeStarted) {
+                challengeStarted = true;
+                startTimer();
+                setFeedback("Challenge started! Follow the instructions.", true);
+                return;
+            }
+            
+            isProcessing = true;
+            setButtonLoading(true);
+            setFeedback("Processing... Please wait.");
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+            try {
+                const res = await fetch("/api/active-challenge", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        step: currentStep, 
+                        image: imageData, 
+                        email: email 
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.status === "NEXT") {
+                    currentStep = data.next_step;
+                    updateProgress();
+                    updateInstruction();
+                    updateArrow();
+                    setFeedback(data.feedback || "✅ Good! Next step.", true);
+                    resetTimer();
+                    
+                } else if (data.status === "COMPLETE") {
+                    updateProgress();
+                    instruction.textContent = "Challenge completed!";
+                    setFeedback("✓ All steps passed! Redirecting...", true);
+                    setResult("Verification successful.", "success");
+                    
+                    challengeActive = false;
+                    challengeStarted = false;
+                    nextBtn.style.display = "none";
+                    stopTimer();
+                    
+                    setTimeout(() => location.href = "/", 2000);
+                    
+                } else if (data.status === "FAILED_STEP") {
+                    setFeedback(data.feedback || "❌ Step failed. Try again.", false);
+                    
+                } else {
+                    setFeedback(data.message || "Unexpected response", false);
+                }
+                
+            } catch (err) {
+                console.error("Fetch error:", err);
+                setFeedback("Network error – please check connection", false);
+            }
+            
+            isProcessing = false;
+            setButtonLoading(false);
+        });
+
+        // Initialize
+        updateProgress();
+        updateArrow();
+        updateResetCounter();
+
+    })();
+    </script>
+</body>
+</html>
