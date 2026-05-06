@@ -14,7 +14,7 @@ dashboard_bp = Blueprint("dashboard_bp", __name__, url_prefix="/api")
 def dashboard_api():
     """
     Fraud monitoring dashboard API with correct counting.
-    FIXED: Handles missing columns gracefully, better error handling
+    Active challenge passed counts as success, failed counts as failed.
     """
     try:
         db = get_db()
@@ -28,18 +28,21 @@ def dashboard_api():
         total = row["total"] if row else 0
 
         # ---------------------------------------------------
-        # SUCCESSFUL VERIFICATIONS
+        # SUCCESSFUL VERIFICATIONS (includes active challenge passed)
         # ---------------------------------------------------
         cursor.execute("""
             SELECT COUNT(*) AS success 
             FROM verification_logs 
-            WHERE LOWER(status) IN ('verified', 'success', 'approved_passive', 'complete')
+            WHERE LOWER(status) IN (
+                'verified', 'success', 'approved_passive', 'complete',
+                'active_challenge_passed', 'active_challenge_success'
+            )
         """)
         row = cursor.fetchone()
         success = row["success"] if row else 0
 
         # ---------------------------------------------------
-        # FAILED VERIFICATIONS - INCLUDES FAILED ACTIVE CHALLENGES
+        # FAILED VERIFICATIONS (includes active challenge failed)
         # ---------------------------------------------------
         cursor.execute("""
             SELECT COUNT(*) AS failed 
@@ -47,14 +50,14 @@ def dashboard_api():
             WHERE LOWER(status) IN (
                 'rejected', 'spoof', 'blocked', 'deepfake', 
                 'error', 'requires_active', 'requires_active_failed',
-                'active_challenge_failed'
+                'active_challenge_failed', 'active_challenge_failure'
             )
         """)
         row = cursor.fetchone()
         failed = row["failed"] if row else 0
 
         # ---------------------------------------------------
-        # FRAUD ALERTS - FIXED: Handles missing risk_score column
+        # FRAUD ALERTS
         # ---------------------------------------------------
         try:
             # Check if risk_score column exists
@@ -70,14 +73,14 @@ def dashboard_api():
                 cursor.execute("""
                     SELECT COUNT(*) AS alerts 
                     FROM verification_logs 
-                    WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed')
+                    WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed', 'active_challenge_failed')
                        OR risk_score > 55
                 """)
             else:
                 cursor.execute("""
                     SELECT COUNT(*) AS alerts 
                     FROM verification_logs 
-                    WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed')
+                    WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed', 'active_challenge_failed')
                 """)
             row = cursor.fetchone()
             alerts = row["alerts"] if row else 0
@@ -86,16 +89,15 @@ def dashboard_api():
             cursor.execute("""
                 SELECT COUNT(*) AS alerts 
                 FROM verification_logs 
-                WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed')
+                WHERE LOWER(status) IN ('spoof', 'deepfake', 'blocked', 'requires_active_failed', 'active_challenge_failed')
             """)
             row = cursor.fetchone()
             alerts = row["alerts"] if row else 0
 
         # ---------------------------------------------------
-        # RECENT VERIFICATION LOGS - FIXED: Handles missing columns
+        # RECENT VERIFICATION LOGS
         # ---------------------------------------------------
         try:
-            # Try with risk_score column first
             cursor.execute("""
                 SELECT 
                     COALESCE(u.email, 'unknown') AS email,
@@ -103,15 +105,14 @@ def dashboard_api():
                     v.similarity_score AS similarity,
                     COALESCE(v.risk_score, 0) AS risk_score,
                     v.details,
-                    DATE_FORMAT(v.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+                    DATE_FORMAT(v.created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
                 FROM verification_logs v
                 LEFT JOIN users u ON v.user_id = u.id
                 ORDER BY v.created_at DESC
                 LIMIT 50
             """)
         except Exception as e:
-            logger.warning(f"Risk score column missing in query: {e}")
-            # Fallback without risk_score
+            logger.warning(f"Column error in logs query: {e}")
             cursor.execute("""
                 SELECT 
                     COALESCE(u.email, 'unknown') AS email,
@@ -119,7 +120,7 @@ def dashboard_api():
                     v.similarity_score AS similarity,
                     0 AS risk_score,
                     v.details,
-                    DATE_FORMAT(v.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+                    DATE_FORMAT(v.created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
                 FROM verification_logs v
                 LEFT JOIN users u ON v.user_id = u.id
                 ORDER BY v.created_at DESC
@@ -133,7 +134,6 @@ def dashboard_api():
         # Format logs for frontend
         formatted_logs = []
         for log in logs:
-            # Determine if this is a fraud alert
             is_fraud = False
             status_lower = log["status"].lower() if log["status"] else ""
             
@@ -142,7 +142,6 @@ def dashboard_api():
             elif log.get("risk_score") and int(log["risk_score"]) > 55:
                 is_fraud = True
             
-            # Parse details for additional info
             details_dict = {}
             try:
                 if log.get("details"):
@@ -153,16 +152,11 @@ def dashboard_api():
             except:
                 pass
             
-            # Extract active challenge status from details
             active_challenge_status = "—"
             if details_dict:
-                if details_dict.get("active_challenge") == "passed":
+                if details_dict.get("active_challenge") == "passed" or details_dict.get("challenge_completed") == True:
                     active_challenge_status = "Passed"
-                elif details_dict.get("active_challenge") == "failed":
-                    active_challenge_status = "Failed"
-                elif details_dict.get("challenge_completed") == True:
-                    active_challenge_status = "Passed"
-                elif details_dict.get("challenge_completed") == False:
+                elif details_dict.get("active_challenge") == "failed" or details_dict.get("challenge_completed") == False:
                     active_challenge_status = "Failed"
             
             formatted_logs.append({
