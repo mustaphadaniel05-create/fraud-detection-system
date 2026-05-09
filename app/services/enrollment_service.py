@@ -1,8 +1,7 @@
 """
-Enrollment service – VERY STRICT CLARITY CHECK.
-Only accepts extremely clear, well-focused faces (Laplacian ≥ 60).
+Enrollment service – VERY STRICT CLARITY + VERY FORGIVING FRONTAL POSE.
+Only accepts clear faces, but allows moderate head turns and tilts.
 """
-
 import json
 import logging
 import tempfile
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(
     model_selection=0,
-    min_detection_confidence=0.80   # higher confidence for enrollment
+    min_detection_confidence=0.80
 )
 
 TARGET_SIZE = (160, 160)
@@ -38,12 +37,119 @@ ENROLL_CONTRAST_MIN = 35
 ENROLL_FACE_SIZE_MIN = 20
 ENROLL_FACE_SIZE_MAX = 50
 
+# VERY FORGIVING head pose limits (angles in degrees)
+MAX_YAW = 40          # looking left/right
+MAX_PITCH = 40        # looking up/down
+MAX_ROLL = 70         # head tilt (after normalisation)
 
+
+# ======================================================================
+# HEAD POSE ESTIMATION WITH NORMALISED ROLL
+# ======================================================================
+def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
+    """
+    Estimate yaw, pitch, roll using MediaPipe FaceMesh.
+    Returns angles in degrees, with roll normalised to [-90, 90].
+    """
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5
+    )
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb)
+    if not results.multi_face_landmarks:
+        return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}
+
+    landmarks = results.multi_face_landmarks[0].landmark
+    h, w = image.shape[:2]
+
+    # 3D model points (nose tip, chin, left eye corner, right eye corner, left mouth, right mouth)
+    model_points = np.array([
+        (0.0, 0.0, 0.0),          # Nose tip
+        (0.0, -330.0, -65.0),     # Chin
+        (-225.0, 170.0, -135.0),  # Left eye left corner
+        (225.0, 170.0, -135.0),   # Right eye right corner
+        (-150.0, -150.0, -125.0), # Left mouth corner
+        (150.0, -150.0, -125.0)   # Right mouth corner
+    ], dtype=np.float64)
+
+    idx = [1, 152, 33, 263, 61, 291]
+    image_points = np.array([
+        (landmarks[i].x * w, landmarks[i].y * h) for i in idx
+    ], dtype=np.float64)
+
+    focal_length = w
+    center = (w / 2, h / 2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype="double")
+    dist_coeffs = np.zeros((4, 1))
+
+    success, rot_vec, _ = cv2.solvePnP(
+        model_points, image_points, camera_matrix, dist_coeffs,
+        flags=cv2.SOLVEPNP_ITERATIVE
+    )
+    if not success:
+        return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}
+
+    rot_mat, _ = cv2.Rodrigues(rot_vec)
+    # Extract Euler angles (pitch, yaw, roll)
+    sy = np.sqrt(rot_mat[0,0]**2 + rot_mat[1,0]**2)
+    singular = sy < 1e-6
+    if not singular:
+        pitch = np.arctan2(-rot_mat[2,0], sy)
+        yaw = np.arctan2(rot_mat[1,0], rot_mat[0,0])
+        roll = np.arctan2(rot_mat[2,1], rot_mat[2,2])
+    else:
+        pitch = np.arctan2(-rot_mat[2,0], sy)
+        yaw = np.arctan2(-rot_mat[1,2], rot_mat[1,1])
+        roll = 0
+
+    # Convert to degrees
+    yaw = np.degrees(yaw)
+    pitch = np.degrees(pitch)
+    roll = np.degrees(roll)
+
+    # Normalise roll to the range [-90, 90]
+    # If roll is near ±180°, it actually means upright (no tilt)
+    roll = (roll + 180) % 360 - 180
+    if roll > 90:
+        roll = 180 - roll
+    elif roll < -90:
+        roll = -180 - roll
+
+    return {
+        "yaw": round(yaw, 1),
+        "pitch": round(pitch, 1),
+        "roll": round(roll, 1)
+    }
+
+
+def _check_head_pose(image: np.ndarray) -> Tuple[bool, str, Dict]:
+    """Check if face is frontal enough (very forgiving)."""
+    pose = _estimate_head_pose(image)
+    yaw = abs(pose["yaw"])
+    pitch = abs(pose["pitch"])
+    roll = abs(pose["roll"])
+    ok = (yaw <= MAX_YAW and pitch <= MAX_PITCH and roll <= MAX_ROLL)
+    msg = (f"Head pose: yaw={pose['yaw']}°, pitch={pose['pitch']}°, roll={pose['roll']}°"
+           f" (limits: {MAX_YAW}°, {MAX_PITCH}°, {MAX_ROLL}°)")
+    if not ok:
+        msg = f"Please look straight – {msg}"
+    else:
+        msg = f"Head position good – {msg}"
+    return ok, msg, pose
+
+
+# ======================================================================
+# CLARITY AND BASIC QUALITY CHECKS (strict)
+# ======================================================================
 def _check_clarity_strict(image: np.ndarray) -> Tuple[bool, str, float]:
-    """
-    Strict clarity check using Laplacian variance.
-    Only returns True if image is very sharp (≥60).
-    """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
     is_clear = lap_var >= ENROLL_CLARITY_THRESHOLD
@@ -52,7 +158,6 @@ def _check_clarity_strict(image: np.ndarray) -> Tuple[bool, str, float]:
         msg += " – Please hold camera perfectly still and ensure good focus."
     logger.info(f"Clarity: {lap_var:.1f} -> {'PASS' if is_clear else 'FAIL'}")
     return is_clear, msg, lap_var
-
 
 def _check_brightness(image: np.ndarray) -> Tuple[bool, str, float]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -63,14 +168,12 @@ def _check_brightness(image: np.ndarray) -> Tuple[bool, str, float]:
         return False, f"Image too bright ({brightness:.0f}). Reduce lighting.", brightness
     return True, f"Brightness OK ({brightness:.0f})", brightness
 
-
 def _check_contrast(image: np.ndarray) -> Tuple[bool, str, float]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     contrast = gray.std()
     if contrast < ENROLL_CONTRAST_MIN:
         return False, f"Low contrast ({contrast:.0f}). Ensure even lighting.", contrast
     return True, f"Contrast OK ({contrast:.0f})", contrast
-
 
 def _check_face_size(face_box: tuple, frame_shape: tuple) -> Tuple[bool, str, float]:
     h, w = frame_shape[:2]
@@ -81,7 +184,6 @@ def _check_face_size(face_box: tuple, frame_shape: tuple) -> Tuple[bool, str, fl
     if face_width_pct > ENROLL_FACE_SIZE_MAX:
         return False, f"Face too close ({face_width_pct:.0f}%). Move back.", face_width_pct
     return True, f"Face size OK ({face_width_pct:.0f}%)", face_width_pct
-
 
 def _enhance_image(image: np.ndarray) -> np.ndarray:
     if image is None: return image
@@ -96,14 +198,12 @@ def _enhance_image(image: np.ndarray) -> np.ndarray:
     except:
         return image
 
-
 def _crop_face(image: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[tuple]]:
     if image is None: return None, None
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     results = face_detection.process(rgb)
     if not results or not results.detections:
         return None, None
-    # largest face
     detection = max(results.detections, key=lambda d: 
                     d.location_data.relative_bounding_box.width * 
                     d.location_data.relative_bounding_box.height)
@@ -121,7 +221,6 @@ def _crop_face(image: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[tuple]
     cropped = image[y1:y2, x1:x2]
     cropped = cv2.resize(cropped, TARGET_SIZE)
     return cropped, (x, y, width, height)
-
 
 def _generate_embedding(image: np.ndarray) -> Optional[np.ndarray]:
     temp_path = None
@@ -145,8 +244,10 @@ def _generate_embedding(image: np.ndarray) -> Optional[np.ndarray]:
             os.unlink(temp_path)
 
 
+# ======================================================================
+# MAIN ENROLLMENT FUNCTION
+# ======================================================================
 def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str, Any], int]:
-    # Basic validation
     email = (email or "").strip().lower()
     full_name = (full_name or "").strip()
     if len(full_name) < 3:
@@ -163,25 +264,32 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if cropped_face is None:
         return {"status": "error", "message": "No face detected. Center your face."}, 400
 
-    # ========== STRICT CLARITY CHECK FIRST ==========
-    clear, msg, sharpness = _check_clarity_strict(cropped_face)
+    # 1. Strict clarity (sharpness)
+    clear, msg, _ = _check_clarity_strict(cropped_face)
     if not clear:
         return {"status": "error", "message": msg}, 400
 
-    # Additional quality checks
+    # 2. Face size check
     ok, msg, _ = _check_face_size(face_box, enhanced.shape)
     if not ok:
         return {"status": "error", "message": msg}, 400
 
+    # 3. Brightness
     ok, msg, _ = _check_brightness(cropped_face)
     if not ok:
         return {"status": "error", "message": msg}, 400
 
+    # 4. Contrast
     ok, msg, _ = _check_contrast(cropped_face)
     if not ok:
         return {"status": "error", "message": msg}, 400
 
-    # Final re-check clarity after all processing (extra safety)
+    # 5. Head pose (very forgiving)
+    ok, msg, pose = _check_head_pose(cropped_face)
+    if not ok:
+        return {"status": "error", "message": msg}, 400
+
+    # 6. Final re-check clarity (extra safety)
     clear2, msg2, _ = _check_clarity_strict(cropped_face)
     if not clear2:
         return {"status": "error", "message": "Image became distorted – please retry"}, 400
