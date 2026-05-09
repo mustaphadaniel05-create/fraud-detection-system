@@ -3,11 +3,20 @@ import pymysql
 import logging
 from flask import current_app
 from contextlib import contextmanager
+import tempfile
 
 logger = logging.getLogger(__name__)
 
 def _get_ssl_config():
-    # Disable SSL for local MySQL
+    ca_cert = os.getenv("MYSQL_SSL_CA")
+    if ca_cert and ca_cert.startswith("-----BEGIN CERTIFICATE-----"):
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+                f.write(ca_cert)
+                return {"ca": f.name}
+        except Exception as e:
+            logger.error(f"Failed to write CA cert: {e}")
+    logger.warning("MYSQL_SSL_CA not set or invalid. SSL disabled.")
     return None
 
 @contextmanager
@@ -36,9 +45,9 @@ def get_connection():
             port=port,
             cursorclass=pymysql.cursors.DictCursor,
             ssl=ssl_config,
-            connect_timeout=8,
-            read_timeout=15,
-            write_timeout=15,
+            connect_timeout=10,
+            read_timeout=30,
+            write_timeout=30,
             autocommit=False,
             charset='utf8mb4'
         )
@@ -77,9 +86,9 @@ def get_db():
             port=port,
             cursorclass=pymysql.cursors.DictCursor,
             ssl=ssl_config,
-            connect_timeout=8,
-            read_timeout=15,
-            write_timeout=15,
+            connect_timeout=10,
+            read_timeout=30,
+            write_timeout=30,
             autocommit=True,
             charset='utf8mb4'
         )
@@ -93,18 +102,15 @@ def test_connection():
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT 1")
-                result = cursor.fetchone()
-                return result is not None
+                return cursor.fetchone() is not None
     except Exception as e:
         logger.error(f"Database connection test failed: {e}")
         return False
 
 def create_tables():
-    """Ensure required tables exist and add missing columns if needed."""
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # Users table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS users (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -114,7 +120,6 @@ def create_tables():
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                # Verification logs table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS verification_logs (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -127,7 +132,6 @@ def create_tables():
                         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
                     )
                 """)
-                # Security events table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS security_events (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -138,15 +142,13 @@ def create_tables():
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                # Add missing columns if upgrading from older schema
+                # Add missing columns (safe)
                 try:
                     cursor.execute("ALTER TABLE verification_logs ADD COLUMN risk_score INT DEFAULT 0")
-                except Exception:
-                    pass  # column already exists
+                except: pass
                 try:
                     cursor.execute("ALTER TABLE verification_logs ADD COLUMN details JSON NULL")
-                except Exception:
-                    pass  # column already exists
+                except: pass
                 conn.commit()
                 logger.info("Tables verified/created successfully.")
     except Exception as e:
