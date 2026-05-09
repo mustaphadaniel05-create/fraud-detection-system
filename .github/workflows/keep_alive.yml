@@ -1,0 +1,14 @@
+name: Keep Hugging Face Space Awake
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send HEAD request to health endpoint
+        run: |
+          curl -I -s https://Manifest090-fraud-detection-system.hf.space/health
