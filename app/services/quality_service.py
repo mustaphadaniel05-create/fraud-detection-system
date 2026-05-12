@@ -1,5 +1,5 @@
 """
-Image quality service for face verification - FORGIVING MODE.
+Image quality service for face verification - EXTRA FORGIVING MODE.
 Accepts clear real faces, rejects only truly problematic images.
 """
 
@@ -13,51 +13,51 @@ logger = logging.getLogger(__name__)
 
 class QualityService:
     """
-    Forgiving quality service – accepts more real faces.
+    Extra forgiving quality service – accepts more real faces, especially with lighting variations.
     """
     
     # ======================================================================
-    # FORGIVING QUALITY THRESHOLDS
+    # EXTRA FORGIVING QUALITY THRESHOLDS
     # ======================================================================
     
     # Blur detection (Laplacian variance)
     BLUR_EXCELLENT = 100      
     BLUR_GOOD = 70            
     BLUR_ACCEPTABLE = 38      
-    BLUR_REJECT = 15          # was 25 – only reject extremely blurry
+    BLUR_REJECT = 15          # only reject extremely blurry
     
-    # Brightness (0-255 range)
-    BRIGHTNESS_IDEAL_MIN = 60  
-    BRIGHTNESS_IDEAL_MAX = 210 
-    BRIGHTNESS_ACCEPTABLE_MIN = 45  
-    BRIGHTNESS_ACCEPTABLE_MAX = 230 
-    BRIGHTNESS_REJECT_DARK = 25     # was 30
-    BRIGHTNESS_REJECT_BRIGHT = 245  # unchanged
+    # Brightness (0-255 range) – MUCH MORE FORGIVING
+    BRIGHTNESS_IDEAL_MIN = 40      # lowered from 60
+    BRIGHTNESS_IDEAL_MAX = 230     # increased from 210
+    BRIGHTNESS_ACCEPTABLE_MIN = 25 # lowered from 45
+    BRIGHTNESS_ACCEPTABLE_MAX = 245 # increased from 230
+    BRIGHTNESS_REJECT_DARK = 15     # lowered from 25
+    BRIGHTNESS_REJECT_BRIGHT = 250  # increased from 245
     
     # Contrast (standard deviation)
     CONTRAST_EXCELLENT = 50   
     CONTRAST_GOOD = 35        
     CONTRAST_ACCEPTABLE = 22  
-    CONTRAST_REJECT = 8       # was 12
+    CONTRAST_REJECT = 6        # was 8 – more forgiving
     
     # Face size (% of frame)
     FACE_SIZE_IDEAL_MIN = 22      
     FACE_SIZE_IDEAL_MAX = 48      
     FACE_SIZE_ACCEPTABLE_MIN = 18     
-    FACE_SIZE_REJECT_SMALL = 15    # unchanged
-    FACE_SIZE_REJECT_LARGE = 60    # unchanged
+    FACE_SIZE_REJECT_SMALL = 15    
+    FACE_SIZE_REJECT_LARGE = 60    
     
-    # Glare detection
+    # Glare detection – MORE FORGIVING
     GLARE_THRESHOLD = 240
-    GLARE_PERCENT_MAX = 12        # unchanged
-    GLARE_PERCENT_REJECT = 18     # unchanged
+    GLARE_PERCENT_MAX = 20          # increased from 12
+    GLARE_PERCENT_REJECT = 30       # increased from 18
     
     # ======================================================================
     
     @classmethod
     def check_image_quality(cls, frame: np.ndarray) -> Tuple[bool, str, float]:
         """
-        Forgiving image quality check – accepts more real faces.
+        Extra forgiving image quality check.
         Returns: (is_good_quality, reason_message, quality_score)
         """
         if frame is None or frame.size == 0:
@@ -74,9 +74,9 @@ class QualityService:
             
             logger.debug(f"Quality: blur={blur_score:.1f}, bright={brightness:.1f}, contrast={contrast:.1f}, glare={glare_percent:.1f}%")
             
-            # ========== FORGIVING CHECKS - Only reject extreme cases ==========
+            # ========== EXTRA FORGIVING CHECKS ==========
             
-            # 1. Brightness check
+            # 1. Brightness check – only reject extreme cases
             if brightness < cls.BRIGHTNESS_REJECT_DARK:
                 return False, f"Image too dark ({brightness:.0f}). Please turn on lights.", brightness
             if brightness > cls.BRIGHTNESS_REJECT_BRIGHT:
@@ -94,7 +94,7 @@ class QualityService:
             if glare_percent > cls.GLARE_PERCENT_REJECT:
                 return False, f"Too much glare ({glare_percent:.0f}%). Please avoid bright lights facing camera.", glare_percent
             
-            # Calculate quality score (0-100) - Just for logging
+            # Calculate quality score (0-100)
             quality_score = cls._calculate_quality_score(blur_score, brightness, contrast, glare_percent)
             
             # Log warnings for borderline cases but don't reject
@@ -112,7 +112,7 @@ class QualityService:
             return True, "Unable to check quality", 70.0  # Default to pass on error
     
     # ======================================================================
-    # FAST CALCULATION METHODS
+    # FAST CALCULATION METHODS (unchanged)
     # ======================================================================
     
     @staticmethod
@@ -155,37 +155,32 @@ class QualityService:
         elif contrast < cls.CONTRAST_EXCELLENT:
             score -= 4
         
-        # Glare penalty
+        # Glare penalty – more forgiving
         if glare > cls.GLARE_PERCENT_MAX:
             score -= 8
-        elif glare > 6:
+        elif glare > 10:
             score -= 4
         
         return max(0, min(100, score))
     
     # ======================================================================
-    # FACE SIZE CHECK - More Forgiving
+    # FACE SIZE CHECK (unchanged)
     # ======================================================================
     
     @classmethod
     def check_face_size(cls, face_width_pct: float) -> Tuple[bool, str]:
-        """Check if face is at optimal distance – Forgiving."""
         if face_width_pct < cls.FACE_SIZE_REJECT_SMALL:
             return False, f"Face too far ({face_width_pct:.0f}%). Please move closer."
-        
         if face_width_pct > cls.FACE_SIZE_REJECT_LARGE:
             return False, f"Face too close ({face_width_pct:.0f}%). Please move back."
-        
         if face_width_pct < cls.FACE_SIZE_ACCEPTABLE_MIN:
             return True, f"Face a bit far ({face_width_pct:.0f}%). Move closer for better results."
-        
         if face_width_pct > cls.FACE_SIZE_IDEAL_MAX:
             return True, f"Face a bit close ({face_width_pct:.0f}%). Move back slightly."
-        
         return True, f"Face distance good ({face_width_pct:.0f}%)."
     
     # ======================================================================
-    # QUICK CHECKS
+    # QUICK CHECKS (unchanged but using new thresholds)
     # ======================================================================
     
     @classmethod
@@ -225,10 +220,8 @@ class QualityService:
     def is_black_frame(cls, frame: np.ndarray, threshold: float = None) -> bool:
         if frame is None or frame.size == 0:
             return True
-        
         if threshold is None:
             threshold = cls.BRIGHTNESS_REJECT_DARK
-            
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             return np.mean(gray) < threshold
@@ -237,17 +230,15 @@ class QualityService:
     
     @classmethod
     def is_face_clear(cls, frame: np.ndarray, threshold: float = 30) -> Tuple[bool, float]:
-        """Check if face is clear – more forgiving threshold."""
         if frame is None or frame.size == 0:
             return False, 0.0
-        
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             clarity_score = cv2.Laplacian(gray, cv2.CV_64F).var()
             return clarity_score >= threshold, clarity_score
         except Exception as e:
             logger.error(f"Clarity check error: {e}")
-            return True, 50.0  # Default to clear on error
+            return True, 50.0
     
     # ======================================================================
     # COMPREHENSIVE QUALITY REPORT
@@ -257,15 +248,12 @@ class QualityService:
     def get_quality_report(cls, frame: np.ndarray) -> Dict[str, Any]:
         if frame is None or frame.size == 0:
             return {"error": "Invalid frame"}
-        
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
             blur_score = cls._fast_blur(gray)
             brightness = cls._fast_brightness(gray)
             contrast = cls._fast_contrast(gray)
             glare = cls._fast_glare(frame, gray)
-            
             return {
                 "blur_score": round(blur_score, 1),
                 "brightness": round(brightness, 1),
