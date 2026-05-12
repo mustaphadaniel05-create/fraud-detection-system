@@ -8,7 +8,7 @@ load_dotenv()
 class Config:
     """
     Central configuration for the fraud detection system.
-    FORGIVING MODE – Deepfake threshold 0.55, similarity 0.50.
+    STRICTER DEEPFAKE MODE – Threshold lowered to 0.48.
     """
 
     # Core Security
@@ -32,23 +32,23 @@ class Config:
     RECOGNITION_MODEL = "ArcFace"
     MINIFASNET_MODEL_PATH = "models/2.7_80x80_MiniFASNetV2.pth"
 
-    # Deepfake Detection – FORGIVING (0.55)
+    # Deepfake Detection – STRICTER (threshold 0.48)
     DEEPFAKE_MODEL_PATH = os.getenv("DEEPFAKE_MODEL_PATH", "models/xception_deepfake.h5")
-    DEEPFAKE_THRESHOLD = 0.55               # changed from 0.52 to 0.55
-    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.70
+    DEEPFAKE_THRESHOLD = 0.48               # lowered from 0.55 to make it harder for deepfakes
+    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.60  # adjusted accordingly
 
     # Frame Requirements
     MIN_FRAMES_REQUIRED = 6
     MAX_FRAMES_ALLOWED = 15
 
     # Face Similarity – MORE FORGIVING
-    SIMILARITY_THRESHOLD = 0.50             # was 0.60 – easier to match
+    SIMILARITY_THRESHOLD = 0.50
 
     # Passive Liveness – MORE FORGIVING
-    PASSIVE_LIVENESS_THRESHOLD = 0.45       # was 0.60
+    PASSIVE_LIVENESS_THRESHOLD = 0.45
 
     # Anti-Spoof – MORE FORGIVING
-    ANTISPOOF_REAL_THRESHOLD = 0.80         # was 0.88
+    ANTISPOOF_REAL_THRESHOLD = 0.80
 
     # AntiSpoofService Internal Thresholds
     FREQ_THRESHOLD = 11.0
@@ -80,7 +80,7 @@ class Config:
     MAX_VERIFICATION_ATTEMPTS = 5
     BLOCK_DURATION_SECONDS = 900
 
-    # Email Settings
+    # Email Settings (not used on HF due to network restrictions)
     MAIL_SERVER = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
     MAIL_PORT = int(os.getenv('MAIL_PORT', 587))
     MAIL_USE_TLS = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'

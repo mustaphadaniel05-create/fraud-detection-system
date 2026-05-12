@@ -1,6 +1,7 @@
 """
-Quick liveness detection – DEEPFAKE‑RESISTANT BLINK DETECTION.
-Optimized for 6 frames.
+Quick liveness detection – REAL BLINK DETECTION (forgiving).
+Requires at least 1 blink (eyes closed for 1 frame) to pass.
+Rejects static photos based on low EAR variation.
 """
 
 import logging
@@ -25,14 +26,13 @@ _face_mesh = mp_face_mesh.FaceMesh(
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
-# MODERATELY STRICT THRESHOLDS
-EAR_THRESHOLD = 0.18
-MIN_CONSECUTIVE_FRAMES = 2
-REQUIRED_BLINKS = 1
-STATIC_VARIATION_THRESHOLD = 0.55
+# Forgiving thresholds
+EAR_THRESHOLD = 0.20            # Eyes closed threshold (was 0.18)
+MIN_CONSECUTIVE_FRAMES = 1      # ONE closed frame = blink (was 2)
+REQUIRED_BLINKS = 1             # Need one blink
+STATIC_VARIATION_THRESHOLD = 0.55  # Static photos have low variation
 
-# Allow 6 frames (reduced from 10)
-MIN_FRAMES_FOR_LIVENESS = 6
+MIN_FRAMES_FOR_LIVENESS = 6     # Expect exactly 6 frames
 
 def _eye_aspect_ratio(landmarks, eye_indices, frame_w, frame_h) -> float:
     points = []
@@ -52,7 +52,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
             "is_live": False,
             "blinks_detected": 0,
             "ear_variation": 0.0,
-            "reason": f"Insufficient frames ({len(frames)} < {MIN_FRAMES_FOR_LIVENESS})"
+            "reason": "Insufficient frames – please retry"
         }
 
     real_blinks = 0
@@ -70,7 +70,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
                 continue
             if len(results.multi_face_landmarks) > 1:
                 multiple_faces_detected = True
-                logger.warning(f"⚠️ Multiple faces detected in frame {i}")
+                logger.warning(f"Multiple faces in frame {i}")
             frames_with_face += 1
             landmarks = results.multi_face_landmarks[0].landmark
             h, w = frame.shape[:2]
@@ -85,14 +85,14 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
             else:
                 if consecutive_closed >= MIN_CONSECUTIVE_FRAMES:
                     real_blinks += 1
-                    logger.info(f"👁️ REAL BLINK DETECTED! ({consecutive_closed} frames) Total: {real_blinks}")
+                    logger.info(f"Blink detected! (frames closed: {consecutive_closed}) Total: {real_blinks}")
                 consecutive_closed = 0
         except Exception:
             continue
 
     if consecutive_closed >= MIN_CONSECUTIVE_FRAMES:
         real_blinks += 1
-        logger.info(f"👁️ REAL BLINK DETECTED! ({consecutive_closed} frames) Total: {real_blinks}")
+        logger.info(f"Blink detected at end! (frames closed: {consecutive_closed})")
 
     ear_variation = float(np.std(ear_values)) if len(ear_values) > 1 else 0.0
 
@@ -117,7 +117,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
         }
 
     if frames_with_face > 0:
-        if ear_variation < STATIC_VARIATION_THRESHOLD:
+        if ear_variation < STATIC_VARIATION_THRESHOLD and real_blinks == 0:
             return {
                 "is_live": False,
                 "blinks_detected": 0,
@@ -128,7 +128,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
             "is_live": False,
             "blinks_detected": 0,
             "ear_variation": ear_variation,
-            "reason": "No blink detected – please blink naturally"
+            "reason": "No blink detected – please blink naturally during capture"
         }
 
     return {

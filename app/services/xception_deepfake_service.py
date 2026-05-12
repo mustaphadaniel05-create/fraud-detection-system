@@ -1,6 +1,6 @@
 """
-XceptionNet-based deepfake detection – FORGIVING MODE
-Threshold = 0.55
+XceptionNet-based deepfake detection – STRICTER MODE
+Threshold = Config.DEEPFAKE_THRESHOLD (default 0.48)
 """
 
 import logging
@@ -25,7 +25,8 @@ class XceptionDeepfakeDetector:
     def __init__(self, model_path: Optional[str] = None):
         self.model = None
         self.input_size = (299, 299)
-        self.threshold = 0.55   # set to 0.55
+        self.threshold = Config.DEEPFAKE_THRESHOLD   # read from config (now 0.48)
+        logger.info(f"Deepfake detector threshold set to {self.threshold}")
 
         self._load_model_with_fallback(model_path)
         if self.model is None:
@@ -155,8 +156,9 @@ class XceptionDeepfakeDetector:
 
             fake_score = (freq_score * 0.30 + texture_score * 0.30 + noise_score * 0.15 +
                           edge_score * 0.15 + color_score * 0.10)
-            is_fake = fake_score > 0.55   # changed to 0.55
-            logger.info(f"Heuristic detection: score={fake_score:.3f}, is_fake={is_fake}")
+            # Use the same threshold as config
+            is_fake = fake_score > self.threshold
+            logger.info(f"Heuristic detection: score={fake_score:.3f}, is_fake={is_fake}, threshold={self.threshold}")
             return {
                 "is_fake": is_fake,
                 "confidence": round(fake_score, 3),
@@ -188,7 +190,7 @@ class XceptionDeepfakeDetector:
         mean_score = float(np.mean(scores))
         fake_frames = sum(1 for r in frame_results if r.get("is_fake", False))
         fake_ratio = fake_frames / len(frame_results) if frame_results else 0
-        if mean_score > 0.55 or fake_ratio >= 0.4:   # changed to 0.55
+        if mean_score > self.threshold or fake_ratio >= 0.4:
             is_fake = True
             confidence = mean_score
         else:
