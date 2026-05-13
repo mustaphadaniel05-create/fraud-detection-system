@@ -1,6 +1,7 @@
 """
 Production-ready face verification service - FRIENDLY MESSAGES
 Returns specific, helpful errors for real-face issues.
+Deepfake messages are generic "AI-generated face detected."
 """
 
 import logging
@@ -134,7 +135,7 @@ def _check_email_exists(email: str) -> Tuple[bool, Optional[int], Optional[str]]
         return False, None, None
 
 # ----------------------------------------------------------------------
-# DEEPFAKE DETECTION METHODS (same as before, but we will map results to friendly messages)
+# DEEPFAKE DETECTION METHODS (same as before)
 # ----------------------------------------------------------------------
 def _analyze_temporal_consistency(frames: List[np.ndarray]) -> Tuple[bool, float, str]:
     if len(frames) < 4: return False, 0.0, "insufficient_frames"
@@ -197,7 +198,7 @@ def _check_frequency_anomalies(frame: np.ndarray) -> Tuple[bool, float]:
         return False, 0.0
 
 # ----------------------------------------------------------------------
-# MAIN VERIFICATION FUNCTION with friendly messages
+# MAIN VERIFICATION FUNCTION with friendly deepfake messages
 # ----------------------------------------------------------------------
 def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     email = data.get("email", "").strip().lower()
@@ -313,8 +314,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     similarity = face_result["similarity"]
     logger.info(f"Face matched: {email} (sim={similarity:.3f})")
 
-    # ========== NOW DEEPFAKE CHECKS – these will return "DEEPFAKE" only for actual artifacts ==========
-    # But we will map them to friendly messages as well.
+    # ========== DEEPFAKE CHECKS – all return friendly message ==========
 
     # Frequency anomaly
     is_freq, freq_score = _check_frequency_anomalies(best_frame)
@@ -322,7 +322,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         logger.warning(f"Frequency anomaly: score={freq_score}")
         _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": "frequency_anomaly"})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", "frequency anomaly", 85, attempts, similarity, 0.7, 0.85, freq_score)
-        return {"status": "DEEPFAKE", "reason": "Suspicious frequency pattern detected – possible AI-generated face."}, 200
+        return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
     # Temporal consistency
     is_temp, temp_score, temp_reason = _analyze_temporal_consistency(frames)
@@ -330,7 +330,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         logger.warning(f"Temporal anomaly: {temp_reason}")
         _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": temp_reason})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", temp_reason, 85, attempts, similarity, 0.7, 0.85, temp_score)
-        return {"status": "DEEPFAKE", "reason": "Unnatural motion pattern detected – possible deepfake video."}, 200
+        return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
     # Face-swap
     try:
@@ -341,7 +341,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             logger.warning(f"Face-swap detected: conf={conf}, reasons={reasons}")
             _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": "face_swap"})
             _check_and_send_alerts(email, client_ip, "DEEPFAKE", "face_swap", 85, attempts, similarity, 0.7, 0.85, conf)
-            return {"status": "DEEPFAKE", "reason": "Face-swap deepfake detected – artificial face."}, 200
+            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception as e:
         logger.error(f"Face-swap error: {e}")
 
@@ -355,7 +355,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                 logger.warning(f"XceptionNet deepfake: conf={deepfake_confidence}")
                 _log_verification(user_id, 0.0, "DEEPFAKE", {"deepfake_confidence": deepfake_confidence})
                 _check_and_send_alerts(email, client_ip, "DEEPFAKE", "XceptionNet deepfake", 85, attempts, similarity, 0.7, 0.85, deepfake_confidence)
-                return {"status": "DEEPFAKE", "reason": "AI-generated face detected by deep learning model."}, 200
+                return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception as e:
         logger.error(f"XceptionNet error: {e}")
 
@@ -365,16 +365,16 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         logger.warning(f"Face inconsistency: {cons_reason}")
         _log_verification(user_id, similarity, "DEEPFAKE", {"reason": cons_reason})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", cons_reason, 85, attempts, similarity, 0.7, 0.85, cons_score)
-        return {"status": "DEEPFAKE", "reason": "Inconsistent facial movements – possible face-swap."}, 200
+        return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
     # Blink analysis (part of deepfake detection)
     try:
         liveness_check = quick_liveness_check(frames)
         blinks = liveness_check.get("blinks_detected", 0)
         if blinks == 0:
-            return {"status": "DEEPFAKE", "reason": "No natural blink detected – possible AI-generated video."}, 200
+            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
         if blinks > 10:
-            return {"status": "DEEPFAKE", "reason": "Unnatural blink pattern – possible video replay."}, 200
+            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception:
         pass
 

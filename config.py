@@ -8,7 +8,7 @@ load_dotenv()
 class Config:
     """
     Central configuration for the fraud detection system.
-    DEEPFAKE MODE – Threshold set to 0.54 (moderate).
+    DEEPFAKE MODE – Threshold set to 0.55 (moderate).
     """
 
     # Core Security
@@ -32,10 +32,10 @@ class Config:
     RECOGNITION_MODEL = "ArcFace"
     MINIFASNET_MODEL_PATH = "models/2.7_80x80_MiniFASNetV2.pth"
 
-    # Deepfake Detection – moderate (0.54)
+    # Deepfake Detection – moderate (0.55)
     DEEPFAKE_MODEL_PATH = os.getenv("DEEPFAKE_MODEL_PATH", "models/xception_deepfake.h5")
-    DEEPFAKE_THRESHOLD = 0.54               # changed from 0.48 to 0.54
-    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.70  # adjusted
+    DEEPFAKE_THRESHOLD = 0.55               # changed from 0.54 to 0.55
+    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.70
 
     # Frame Requirements
     MIN_FRAMES_REQUIRED = 6
