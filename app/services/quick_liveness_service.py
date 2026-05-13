@@ -1,5 +1,5 @@
 """
-Quick liveness detection – REAL BLINK DETECTION (forgiving).
+Quick liveness detection – FORGIVING FOR REAL FACES.
 Requires at least 1 blink (eyes closed for 1 frame) to pass.
 Rejects static photos based on low EAR variation.
 """
@@ -12,7 +12,6 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# MediaPipe Face Mesh
 mp_face_mesh = mp.solutions.face_mesh
 _face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=False,
@@ -22,17 +21,15 @@ _face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5
 )
 
-# Eye landmarks
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
-# Forgiving thresholds
-EAR_THRESHOLD = 0.20            # Eyes closed threshold (was 0.18)
-MIN_CONSECUTIVE_FRAMES = 1      # ONE closed frame = blink (was 2)
+# More forgiving thresholds
+EAR_THRESHOLD = 0.22            # Eyes closed threshold (increased from 0.20)
+MIN_CONSECUTIVE_FRAMES = 1      # ONE closed frame = blink
 REQUIRED_BLINKS = 1             # Need one blink
-STATIC_VARIATION_THRESHOLD = 0.55  # Static photos have low variation
-
-MIN_FRAMES_FOR_LIVENESS = 6     # Expect exactly 6 frames
+STATIC_VARIATION_THRESHOLD = 0.50  # Lowered to easier detect static (was 0.55)
+MIN_FRAMES_FOR_LIVENESS = 6
 
 def _eye_aspect_ratio(landmarks, eye_indices, frame_w, frame_h) -> float:
     points = []
@@ -96,16 +93,14 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
 
     ear_variation = float(np.std(ear_values)) if len(ear_values) > 1 else 0.0
 
-    logger.info("=" * 50)
     logger.info(f"RESULTS - Blinks: {real_blinks}, Ear variation: {ear_variation:.4f}")
-    logger.info("=" * 50)
 
     if multiple_faces_detected:
         return {
             "is_live": False,
             "blinks_detected": real_blinks,
             "ear_variation": ear_variation,
-            "reason": "Multiple faces detected – spoof attempt"
+            "reason": "Multiple faces detected"
         }
 
     if real_blinks >= REQUIRED_BLINKS:

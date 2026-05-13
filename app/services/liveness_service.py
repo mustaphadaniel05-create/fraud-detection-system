@@ -1,6 +1,6 @@
 """
 Production-ready passive liveness detection.
-Optimized for 6 frames.
+Optimized for 6 frames, more forgiving for real faces.
 """
 
 import logging
@@ -15,10 +15,6 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# -------------------------------------------------------------------
-# MediaPipe FaceMesh (single global instance for performance)
-# -------------------------------------------------------------------
-
 mp_face_mesh = mp.solutions.face_mesh
 
 _face_mesh_instance = mp_face_mesh.FaceMesh(
@@ -29,37 +25,24 @@ _face_mesh_instance = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5,
 )
 
-
 def get_face_mesh():
-    """Return the shared FaceMesh instance."""
     return _face_mesh_instance
-
-
-# -------------------------------------------------------------------
-# Eye landmarks
-# -------------------------------------------------------------------
 
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
+# Forgiving thresholds
 EAR_THRESHOLD = 0.22
 EAR_MIN_CONSECUTIVE_FRAMES = 3
 
-# -------------------------------------------------------------------
-# System thresholds - OPTIMIZED FOR 6 FRAMES
-# -------------------------------------------------------------------
-
 STANDARD_SIZE = (320, 240)
+MIN_FRAMES_FOR_PASSIVE = 6
 
-MIN_FRAMES_FOR_PASSIVE = 6        # Reduced from 10 to 6
-MIN_MOTION_MEAN = 0.8             
-MIN_MOTION_STD = 0.3              
-MIN_TEXTURE_FOR_LIVE = 20.0       
-MIN_RPPG_SCORE = 0.03             
-
-# -------------------------------------------------------------------
-# Eye Aspect Ratio
-# -------------------------------------------------------------------
+# Lower thresholds for motion and texture to make it easier for real faces
+MIN_MOTION_MEAN = 0.5          # was 0.8
+MIN_MOTION_STD = 0.2           # was 0.3
+MIN_TEXTURE_FOR_LIVE = 15.0    # was 20.0
+MIN_RPPG_SCORE = 0.02          # was 0.03
 
 def _eye_aspect_ratio(landmarks, eye_indices):
     points = [landmarks[i] for i in eye_indices]
@@ -68,39 +51,25 @@ def _eye_aspect_ratio(landmarks, eye_indices):
     C = np.linalg.norm(np.array(points[0]) - np.array(points[3]))
     return (A + B) / (2.0 * C) if C != 0 else 0
 
-
-# -------------------------------------------------------------------
-# Blink Detection - MORE ROBUST (returns blink count and variation)
-# -------------------------------------------------------------------
-
 def detect_blinks(frames: List[np.ndarray]) -> Tuple[int, float]:
-    """
-    Detect blinks and return count and EAR variation.
-    Returns: (blink_count, ear_variation)
-    """
     face_mesh = get_face_mesh()
     blink_count = 0
     consecutive_closed = 0
     ear_values = []
-    
     for frame in frames:
         try:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = face_mesh.process(rgb)
-
             if not result.multi_face_landmarks:
                 consecutive_closed = 0
                 continue
-
             lm = result.multi_face_landmarks[0].landmark
             h, w = frame.shape[:2]
             coords = [(int(l.x * w), int(l.y * h)) for l in lm]
-
             ear_left = _eye_aspect_ratio(coords, LEFT_EYE)
             ear_right = _eye_aspect_ratio(coords, RIGHT_EYE)
             ear = (ear_left + ear_right) / 2
             ear_values.append(ear)
-
             if ear < EAR_THRESHOLD:
                 consecutive_closed += 1
             else:
@@ -109,28 +78,18 @@ def detect_blinks(frames: List[np.ndarray]) -> Tuple[int, float]:
                 consecutive_closed = 0
         except Exception:
             consecutive_closed = 0
-    
     ear_variation = float(np.std(ear_values)) if len(ear_values) > 1 else 0.0
     return blink_count, ear_variation
 
-
-# -------------------------------------------------------------------
-# Head Pose Estimation (unchanged)
-# -------------------------------------------------------------------
-
 def estimate_head_pose(frame):
     face_mesh = get_face_mesh()
-
     try:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = face_mesh.process(rgb)
-
         if not result.multi_face_landmarks:
             return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "magnitude": 0.0}
-
         landmarks = result.multi_face_landmarks[0].landmark
         h, w = frame.shape[:2]
-
         image_points = np.array([
             (landmarks[1].x * w, landmarks[1].y * h),
             (landmarks[33].x * w, landmarks[33].y * h),
@@ -139,7 +98,6 @@ def estimate_head_pose(frame):
             (landmarks[291].x * w, landmarks[291].y * h),
             (landmarks[199].x * w, landmarks[199].y * h)
         ], dtype="double")
-
         model_points = np.array([
             (0.0, 0.0, 0.0),
             (-30.0, -30.0, -30.0),
@@ -148,121 +106,59 @@ def estimate_head_pose(frame):
             (40.0, 30.0, -30.0),
             (0.0, 60.0, -30.0)
         ])
-
         focal_length = w
         center = (w / 2, h / 2)
-
         camera_matrix = np.array([
             [focal_length, 0, center[0]],
             [0, focal_length, center[1]],
             [0, 0, 1]
         ], dtype="double")
-
         success, rotation_vector, _ = cv2.solvePnP(
-            model_points,
-            image_points,
-            camera_matrix,
-            np.zeros((4, 1)),
+            model_points, image_points, camera_matrix, np.zeros((4, 1)),
             flags=cv2.SOLVEPNP_ITERATIVE
         )
-
         if not success:
             return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "magnitude": 0.0}
-
         magnitude = float(np.linalg.norm(rotation_vector))
         yaw = float(rotation_vector[1]) * 180
         pitch = float(rotation_vector[0]) * 180
         roll = float(rotation_vector[2]) * 180
-
-        return {
-            "yaw": yaw,
-            "pitch": pitch,
-            "roll": roll,
-            "magnitude": magnitude
-        }
+        return {"yaw": yaw, "pitch": pitch, "roll": roll, "magnitude": magnitude}
     except Exception:
         return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "magnitude": 0.0}
-
-
-# -------------------------------------------------------------------
-# Motion Detection - MORE ROBUST
-# -------------------------------------------------------------------
 
 def _motion_energy(frames):
     if len(frames) < 2:
         return 0, 0
-    
     gray = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames]
-    
-    diffs = []
-    for i in range(1, len(gray)):
-        diff = cv2.absdiff(gray[i-1], gray[i])
-        diffs.append(np.mean(diff))
-    
+    diffs = [np.mean(cv2.absdiff(gray[i-1], gray[i])) for i in range(1, len(gray))]
     if not diffs:
         return 0, 0
-        
     motion_mean = float(np.mean(diffs))
     motion_std = float(np.std(diffs)) if len(diffs) > 1 else 0
-    
     return motion_mean, motion_std
 
-
-# -------------------------------------------------------------------
-# Texture Score - MORE ROBUST
-# -------------------------------------------------------------------
-
 def _texture_score(frames):
-    vals = []
-    for f in frames:
-        gray = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
-        lap = cv2.Laplacian(gray, cv2.CV_64F)
-        vals.append(lap.var())
-    
-    if not vals:
-        return 0
-        
-    return float(np.median(vals))
-
-
-# -------------------------------------------------------------------
-# rPPG pulse signal - OPTIMIZED FOR 6 FRAMES
-# -------------------------------------------------------------------
+    vals = [cv2.Laplacian(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() for f in frames]
+    return float(np.median(vals)) if vals else 0
 
 def _simple_rppg(frames):
     try:
         greens = [np.mean(f[:, :, 1]) for f in frames if f is not None]
-        
-        if len(greens) < 6:    # was 10
+        if len(greens) < 6:
             return 0
-            
         signal = np.array(greens)
         signal = (signal - np.mean(signal)) / (np.std(signal) + 1e-8)
-        
-        # For short sequences, use a simpler heuristic
         peaks, _ = find_peaks(signal, distance=2, prominence=0.1)
-        
-        # For 6 frames, we expect maybe 1-2 peaks if there's a pulse
-        score = min(len(peaks) / 3.0, 1.0)
-        return score
+        return min(len(peaks) / 3.0, 1.0)
     except Exception:
         return 0
 
-
-# -------------------------------------------------------------------
-# Passive Liveness Detection - FIXED FOR 6 FRAMES
-# -------------------------------------------------------------------
-
 def passive_liveness(frames: List[np.ndarray]) -> Tuple[Dict[str, Any], bool]:
-    """
-    Passive liveness detection optimized for 6 frames.
-    Returns (result_dict, is_live)
-    """
     if not frames or len(frames) < MIN_FRAMES_FOR_PASSIVE:
         logger.warning(f"Not enough frames for passive liveness: {len(frames)}")
         return {"status": "SPOOF", "confidence": 0, "reason": "insufficient_frames"}, False
 
-    # Resize frames for consistent processing
     valid_frames = []
     for f in frames:
         if f is None or f.size == 0:
@@ -277,7 +173,6 @@ def passive_liveness(frames: List[np.ndarray]) -> Tuple[Dict[str, Any], bool]:
         logger.warning(f"Not enough valid frames after resize: {len(valid_frames)}")
         return {"status": "SPOOF", "confidence": 0, "reason": "invalid_frames"}, False
 
-    # Run all checks
     blinks, ear_variation = detect_blinks(valid_frames)
     motion_mean, motion_std = _motion_energy(valid_frames)
     texture = _texture_score(valid_frames)
@@ -285,31 +180,28 @@ def passive_liveness(frames: List[np.ndarray]) -> Tuple[Dict[str, Any], bool]:
 
     logger.info(f"Passive liveness raw: blinks={blinks}, ear_var={ear_variation:.4f}, motion={motion_mean:.2f}±{motion_std:.2f}, texture={texture:.1f}, rppg={rppg:.2f}")
 
-    # Calculate live score - more forgiving for real faces
-    live_score = 0
-    
+    live_score = 0.0
     if blinks >= 2:
         live_score += 0.3
     elif blinks >= 1:
         live_score += 0.2
-    
+
     if motion_mean > MIN_MOTION_MEAN:
         live_score += 0.3
     elif motion_mean > MIN_MOTION_MEAN * 0.7:
         live_score += 0.2
-    
+
     if texture > MIN_TEXTURE_FOR_LIVE:
         live_score += 0.2
     elif texture > MIN_TEXTURE_FOR_LIVE * 0.7:
         live_score += 0.1
-    
+
     if rppg > MIN_RPPG_SCORE:
         live_score += 0.2
     elif rppg > MIN_RPPG_SCORE * 0.5:
         live_score += 0.1
-    
-    live_score = min(live_score, 1.0)
 
+    live_score = min(live_score, 1.0)
     status = "LIVE" if live_score >= Config.PASSIVE_LIVENESS_THRESHOLD else "SPOOF"
 
     result = {
@@ -324,6 +216,5 @@ def passive_liveness(frames: List[np.ndarray]) -> Tuple[Dict[str, Any], bool]:
             "rppg": round(rppg, 3),
         },
     }
-
     logger.info(f"Passive liveness result: {status} (score={live_score:.2f})")
     return result, status == "LIVE"
