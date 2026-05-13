@@ -1,6 +1,6 @@
 """
-Enrollment service – VERY STRICT CLARITY + VERY FORGIVING FRONTAL POSE.
-Only accepts clear faces, but allows moderate head turns and tilts.
+Enrollment service – EXTREMELY STRICT CLARITY + FRONTAL POSE.
+Only accepts very clear, well‑lit, frontal faces.
 """
 import json
 import logging
@@ -24,33 +24,29 @@ logger = logging.getLogger(__name__)
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(
     model_selection=0,
-    min_detection_confidence=0.80
+    min_detection_confidence=0.85   # higher confidence for enrollment
 )
 
 TARGET_SIZE = (160, 160)
 
-# STRICT ENROLLMENT THRESHOLDS
-ENROLL_CLARITY_THRESHOLD = 60.0      # Laplacian variance – sharp image required
-ENROLL_BRIGHTNESS_MIN = 60
-ENROLL_BRIGHTNESS_MAX = 210
-ENROLL_CONTRAST_MIN = 35
-ENROLL_FACE_SIZE_MIN = 20
-ENROLL_FACE_SIZE_MAX = 50
+# EXTREMELY STRICT ENROLLMENT THRESHOLDS
+ENROLL_CLARITY_THRESHOLD = 80.0      # Laplacian variance – very sharp required (was 60)
+ENROLL_BRIGHTNESS_MIN = 70           # was 60
+ENROLL_BRIGHTNESS_MAX = 200          # was 210
+ENROLL_CONTRAST_MIN = 40             # was 35
+ENROLL_FACE_SIZE_MIN = 22            # was 20
+ENROLL_FACE_SIZE_MAX = 45            # was 50
 
-# VERY FORGIVING head pose limits (angles in degrees)
-MAX_YAW = 40          # looking left/right
-MAX_PITCH = 40        # looking up/down
-MAX_ROLL = 70         # head tilt (after normalisation)
+# Stricter frontal pose limits (angles in degrees)
+MAX_YAW = 20          # was 40
+MAX_PITCH = 20        # was 40
+MAX_ROLL = 30         # was 70
 
 
 # ======================================================================
-# HEAD POSE ESTIMATION WITH NORMALISED ROLL
+# HEAD POSE ESTIMATION WITH NORMALISED ROLL (same as before, but thresholds changed)
 # ======================================================================
 def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
-    """
-    Estimate yaw, pitch, roll using MediaPipe FaceMesh.
-    Returns angles in degrees, with roll normalised to [-90, 90].
-    """
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
         static_image_mode=True,
@@ -66,7 +62,6 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
     landmarks = results.multi_face_landmarks[0].landmark
     h, w = image.shape[:2]
 
-    # 3D model points (nose tip, chin, left eye corner, right eye corner, left mouth, right mouth)
     model_points = np.array([
         (0.0, 0.0, 0.0),          # Nose tip
         (0.0, -330.0, -65.0),     # Chin
@@ -98,7 +93,6 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
         return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}
 
     rot_mat, _ = cv2.Rodrigues(rot_vec)
-    # Extract Euler angles (pitch, yaw, roll)
     sy = np.sqrt(rot_mat[0,0]**2 + rot_mat[1,0]**2)
     singular = sy < 1e-6
     if not singular:
@@ -110,13 +104,11 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
         yaw = np.arctan2(-rot_mat[1,2], rot_mat[1,1])
         roll = 0
 
-    # Convert to degrees
     yaw = np.degrees(yaw)
     pitch = np.degrees(pitch)
     roll = np.degrees(roll)
 
-    # Normalise roll to the range [-90, 90]
-    # If roll is near ±180°, it actually means upright (no tilt)
+    # Normalise roll to [-90, 90]
     roll = (roll + 180) % 360 - 180
     if roll > 90:
         roll = 180 - roll
@@ -131,7 +123,7 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
 
 
 def _check_head_pose(image: np.ndarray) -> Tuple[bool, str, Dict]:
-    """Check if face is frontal enough (very forgiving)."""
+    """Check if face is strictly frontal."""
     pose = _estimate_head_pose(image)
     yaw = abs(pose["yaw"])
     pitch = abs(pose["pitch"])
@@ -284,7 +276,7 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if not ok:
         return {"status": "error", "message": msg}, 400
 
-    # 5. Head pose (very forgiving)
+    # 5. Head pose (strict frontal)
     ok, msg, pose = _check_head_pose(cropped_face)
     if not ok:
         return {"status": "error", "message": msg}, 400

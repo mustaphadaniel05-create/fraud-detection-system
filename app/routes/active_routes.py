@@ -24,7 +24,7 @@ active_bp = Blueprint("active", __name__, url_prefix="/api")
 # Initialize FaceMesh
 face_mesh = get_face_mesh()
 
-# CHALLENGES – updated for smile and blink
+# CHALLENGES
 CHALLENGES = [
     {"id": 0, "instruction": "OPEN YOUR MOUTH WIDE and say 'AH'", "type": "mouth"},
     {"id": 1, "instruction": "Nod your head DOWN and UP 3 times slowly", "type": "nod"},
@@ -32,17 +32,20 @@ CHALLENGES = [
     {"id": 3, "instruction": "CLOSE YOUR EYES COMPLETELY (both eyes) – keep closed", "type": "blink"},
 ]
 
-# Thresholds – adjusted
-EAR_CLOSED_THRESHOLD = 0.15      # Eyes closed (was 0.22 for blink detection)
+# Thresholds
+EAR_CLOSED_THRESHOLD = 0.15      # Eyes closed
 MOUTH_OPEN_THRESHOLD = 0.20
 MOUTH_SMILE_THRESHOLD = 0.60      # increased to require real smile
 
-# Nod thresholds (unchanged)
+# Nod thresholds
 NOD_PITCH_THRESHOLD = 18.0
 NOD_MIN_MAGNITUDE = 0.08
 NOD_REQUIRED_FRAMES = 3
 NOD_YAW_THRESHOLD = 10.0
 NOD_ROLL_THRESHOLD = 10.0
+
+# Stricter similarity threshold for active challenge final verification
+ACTIVE_CHALLENGE_SIMILARITY_THRESHOLD = 0.70   # higher than normal (0.60)
 
 
 def _calculate_mouth_open(landmarks, w, h) -> float:
@@ -74,7 +77,6 @@ def _calculate_smile(landmarks, w, h) -> float:
         return 0.0
 
 def _calculate_eye_closed(landmarks, w, h) -> float:
-    """Calculate average Eye Aspect Ratio for both eyes."""
     try:
         left_eye = [landmarks[i] for i in [33, 160, 158, 133, 153, 144]]
         right_eye = [landmarks[i] for i in [362, 385, 387, 263, 373, 380]]
@@ -90,9 +92,8 @@ def _calculate_eye_closed(landmarks, w, h) -> float:
         ear_right = ear(right_eye)
         return (ear_left + ear_right) / 2
     except:
-        return 1.0  # fallback: eyes open
+        return 1.0
 
-# nod detector class (unchanged)
 class NodDetector:
     def __init__(self):
         self.pitch_history: List[float] = []
@@ -141,6 +142,7 @@ class NodDetector:
             else:
                 return False, f"Nod UP – current pitch: {pitch:.1f}° (need -{NOD_PITCH_THRESHOLD}°)"
         return False, "Continue nodding"
+
 _nod_detector = NodDetector()
 
 def _log_active_challenge_result(user_id: Optional[int], email: str, success: bool, 
@@ -231,27 +233,28 @@ def active_challenge() -> Any:
         elif challenge_type == "smile":
             smile_score = _calculate_smile(landmarks, w, h)
             logger.info(f"Smile score: {smile_score:.3f}")
-            # Require score above threshold (0.60)
             passed = smile_score > MOUTH_SMILE_THRESHOLD
             feedback = "Smile WIDER – show your teeth!" if not passed else "Great smile!"
         elif challenge_type == "blink":
-            # Now "CLOSE YOUR EYES COMPLETELY"
             ear = _calculate_eye_closed(landmarks, w, h)
             logger.info(f"Eye aspect ratio (closed): {ear:.3f}")
-            # Require eyes closed (EAR below threshold)
             passed = ear < EAR_CLOSED_THRESHOLD
             feedback = "Close your eyes COMPLETELY – both eyes" if not passed else "Good! Eyes closed correctly."
         if passed:
             if step == len(CHALLENGES) - 1:
                 _nod_detector.reset()
+                # STRICT FACE VERIFICATION – use higher threshold
                 identity_result = verify_identity(email, img)
                 similarity = identity_result.get("similarity", 0.0)
                 verified = identity_result.get("success", False)
                 user_id = identity_result.get("user_id")
+                # Check if face matches with stricter threshold
+                if similarity < ACTIVE_CHALLENGE_SIMILARITY_THRESHOLD:
+                    verified = False
                 if not verified:
-                    logger.warning(f"❌ Active challenge FAILED - face mismatch for {email}")
+                    logger.warning(f"❌ Active challenge FAILED - face mismatch for {email} (sim={similarity:.3f} < {ACTIVE_CHALLENGE_SIMILARITY_THRESHOLD})")
                     _log_active_challenge_result(user_id, email, False, similarity, f"Face mismatch (sim={similarity:.3f})")
-                    return jsonify({"status": "FAILED_STEP", "feedback": "Face does not match enrolled user. Please ensure good lighting.", "attempt": step + 1}), 200
+                    return jsonify({"status": "FAILED_STEP", "feedback": "Face does not match enrolled user. Please use your own face.", "attempt": step + 1}), 200
                 _log_active_challenge_result(user_id, email, True, similarity, "All challenges completed")
                 session["active_liveness_passed"] = True
                 session["active_liveness_email"] = email
