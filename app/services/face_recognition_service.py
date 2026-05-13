@@ -1,6 +1,6 @@
 """
 Face verification service using ArcFace.
-FORGIVING MODE – Lower threshold for real faces.
+STRICTER MODE – Accepts faces with similarity ≥ 0.60.
 """
 
 import json
@@ -35,8 +35,8 @@ _FACE_DETECTION = mp_face_detection.FaceDetection(
 MIN_CROP_SIZE = 120
 TARGET_SIZE = (160, 160)
 
-# FORGIVING THRESHOLD – 0.55 (was 0.65)
-SAME_FACE_THRESHOLD = 0.55
+# STRICTER THRESHOLD – 0.60 (was 0.55)
+SAME_FACE_THRESHOLD = 0.60
 DIFFERENT_FACE_MAX = 0.45
 
 
@@ -142,7 +142,7 @@ def _scale_similarity(cosine_sim: float) -> float:
 
 def verify_identity(email: str, frame: np.ndarray) -> Dict[str, Any]:
     """
-    FORGIVING face verification – accepts matches above threshold (0.55).
+    STRICTER face verification – accepts only matches with similarity ≥ 0.60.
     """
     result = {
         "success": False,
@@ -214,7 +214,7 @@ def verify_identity(email: str, frame: np.ndarray) -> Dict[str, Any]:
         f"threshold={SAME_FACE_THRESHOLD}"
     )
     
-    # FORGIVING decision – accept if similarity >= 0.55
+    # STRICTER decision – accept only if similarity >= 0.60
     if scaled_similarity >= SAME_FACE_THRESHOLD:
         result["success"] = True
         result["user_id"] = user_id
