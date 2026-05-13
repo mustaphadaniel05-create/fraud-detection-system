@@ -95,17 +95,17 @@ def dashboard_api():
             alerts = row["alerts"] if row else 0
 
         # ---------------------------------------------------
-        # RECENT VERIFICATION LOGS
+        # RECENT VERIFICATION LOGS (corrected DATE_FORMAT using raw string)
         # ---------------------------------------------------
         try:
-            cursor.execute("""
+            cursor.execute(r"""
                 SELECT 
                     COALESCE(u.email, 'unknown') AS email,
                     v.status,
                     v.similarity_score AS similarity,
                     COALESCE(v.risk_score, 0) AS risk_score,
                     v.details,
-                    DATE_FORMAT(v.created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
+                    DATE_FORMAT(v.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
                 FROM verification_logs v
                 LEFT JOIN users u ON v.user_id = u.id
                 ORDER BY v.created_at DESC
@@ -113,14 +113,14 @@ def dashboard_api():
             """)
         except Exception as e:
             logger.warning(f"Column error in logs query: {e}")
-            cursor.execute("""
+            cursor.execute(r"""
                 SELECT 
                     COALESCE(u.email, 'unknown') AS email,
                     v.status,
                     v.similarity_score AS similarity,
                     0 AS risk_score,
                     v.details,
-                    DATE_FORMAT(v.created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
+                    DATE_FORMAT(v.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
                 FROM verification_logs v
                 LEFT JOIN users u ON v.user_id = u.id
                 ORDER BY v.created_at DESC
