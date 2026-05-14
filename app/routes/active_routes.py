@@ -47,7 +47,20 @@ NOD_ROLL_THRESHOLD = 10.0
 # Stricter similarity threshold for active challenge final verification
 ACTIVE_CHALLENGE_SIMILARITY_THRESHOLD = 0.70   # higher than normal (0.60)
 
+# ----------------------------------------------------------------------
+# Helper to compute risk score from similarity
+# ----------------------------------------------------------------------
+def _compute_risk_from_similarity(similarity: float) -> int:
+    """
+    Compute risk score (0-100) from face similarity (scaled 0-1).
+    Higher similarity -> lower risk.
+    """
+    risk = int((1.0 - similarity) * 100)
+    return max(0, min(100, risk))
 
+# ----------------------------------------------------------------------
+# Challenge helper functions (unchanged)
+# ----------------------------------------------------------------------
 def _calculate_mouth_open(landmarks, w, h) -> float:
     try:
         upper_lip = landmarks[13]
@@ -145,8 +158,11 @@ class NodDetector:
 
 _nod_detector = NodDetector()
 
+# ----------------------------------------------------------------------
+# Logging function with risk_score parameter
+# ----------------------------------------------------------------------
 def _log_active_challenge_result(user_id: Optional[int], email: str, success: bool, 
-                                  similarity: float = 0.0, reason: str = None) -> None:
+                                  similarity: float = 0.0, risk_score: int = 0, reason: str = None) -> None:
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
@@ -165,13 +181,13 @@ def _log_active_challenge_result(user_id: Optional[int], email: str, success: bo
                         INSERT INTO verification_logs 
                         (user_id, similarity_score, status, risk_score, details, created_at) 
                         VALUES (NULL, %s, %s, %s, %s, NOW())
-                    """, (similarity, status, 0, details_json))
+                    """, (similarity, status, risk_score, details_json))
                 else:
                     cursor.execute("""
                         INSERT INTO verification_logs 
                         (user_id, similarity_score, status, risk_score, details, created_at) 
                         VALUES (%s, %s, %s, %s, %s, NOW())
-                    """, (user_id, similarity, status, 0, details_json))
+                    """, (user_id, similarity, status, risk_score, details_json))
                 conn.commit()
                 if success:
                     logger.info(f"✅ ACTIVE CHALLENGE PASSED - {email}")
@@ -180,6 +196,9 @@ def _log_active_challenge_result(user_id: Optional[int], email: str, success: bo
     except Exception as e:
         logger.error(f"Failed to log active challenge result: {e}")
 
+# ----------------------------------------------------------------------
+# Main route
+# ----------------------------------------------------------------------
 @active_bp.route("/active-challenge", methods=["GET", "POST"])
 def active_challenge() -> Any:
     if request.method == "GET":
@@ -253,9 +272,11 @@ def active_challenge() -> Any:
                     verified = False
                 if not verified:
                     logger.warning(f"❌ Active challenge FAILED - face mismatch for {email} (sim={similarity:.3f} < {ACTIVE_CHALLENGE_SIMILARITY_THRESHOLD})")
-                    _log_active_challenge_result(user_id, email, False, similarity, f"Face mismatch (sim={similarity:.3f})")
+                    _log_active_challenge_result(user_id, email, False, similarity, risk_score=0, reason=f"Face mismatch (sim={similarity:.3f})")
                     return jsonify({"status": "FAILED_STEP", "feedback": "Face does not match enrolled user. Please use your own face.", "attempt": step + 1}), 200
-                _log_active_challenge_result(user_id, email, True, similarity, "All challenges completed")
+                # Compute risk score from similarity
+                risk_score = _compute_risk_from_similarity(similarity)
+                _log_active_challenge_result(user_id, email, True, similarity, risk_score=risk_score, reason="All challenges completed")
                 session["active_liveness_passed"] = True
                 session["active_liveness_email"] = email
                 try:
@@ -305,7 +326,8 @@ def active_challenge_final():
         except Exception as e:
             logger.error(f"Failed to get user_id: {e}")
         _nod_detector.reset()
-        _log_active_challenge_result(user_id, email, False, 0.0, reason)
+        # Failure, risk_score=0
+        _log_active_challenge_result(user_id, email, False, 0.0, risk_score=0, reason=reason)
         return jsonify({"status": "success", "message": "Final failure logged"}), 200
     except Exception as e:
         logger.exception("Failed to log final failure")
