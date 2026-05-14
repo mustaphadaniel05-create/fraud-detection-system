@@ -45,7 +45,7 @@ class Config:
     ENROLLMENT_MODEL = "ArcFace"
     RECOGNITION_MODEL = "ArcFace"
 
-    SIMILARITY_THRESHOLD = 0.82
+    SIMILARITY_THRESHOLD = 0.75
 
     # =========================================================
     # DEEPFAKE DETECTION
