@@ -284,13 +284,34 @@ function getActiveChallengeStatus(status, details) {
 }
 
 /* ---------------------- */
-/* Dashboard loader */
+/* Dashboard loader with Basic Auth */
 /* ---------------------- */
 async function loadDashboard(){
     document.getElementById("refreshStatus").textContent = "Refreshing...";
     
+    // 🔐 Replace these with your actual admin credentials (same as in .env)
+    const username = "admin";
+    const password = "Manifest090.";
+    const credentials = btoa(`${username}:${password}`);
+    
     try{
-        const res = await fetch("/api/dashboard");
+        const res = await fetch("/api/dashboard", {
+            headers: {
+                "Authorization": `Basic ${credentials}`
+            }
+        });
+        
+        // If not authorized, show error
+        if (res.status === 401) {
+            document.getElementById("logs").innerHTML = `
+                <tr><td colspan="6" class="p-6 text-center text-red-500">
+                    Unauthorized – please check admin credentials.
+                </td></tr>
+            `;
+            document.getElementById("refreshStatus").textContent = "Unauthorized";
+            return;
+        }
+        
         const data = await res.json();
 
         /* Stats */

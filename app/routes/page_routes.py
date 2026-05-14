@@ -1,5 +1,6 @@
 # app/routes/page_routes.py
 from flask import Blueprint, render_template
+from app.auth import auth          # <-- added import
 
 page_bp = Blueprint("page_bp", __name__)
 
@@ -37,6 +38,7 @@ def challenge_page():
 
 
 @page_bp.route("/dashboard")
+@auth.login_required               # <-- added decorator
 def dashboard_page():
     """
     System monitoring dashboard

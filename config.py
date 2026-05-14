@@ -204,3 +204,7 @@ class Config:
 
     def __repr__(self):
         return f"<Config debug={self.DEBUG}>"
+    
+    # Dashboard authentication
+    DASHBOARD_USERNAME = os.getenv('DASHBOARD_USERNAME', 'admin')
+    DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', 'admin')

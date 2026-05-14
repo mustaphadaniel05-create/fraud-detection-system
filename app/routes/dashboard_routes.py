@@ -3,6 +3,7 @@
 import logging
 from flask import Blueprint, jsonify
 from app.db import get_db
+from app.auth import auth          # <-- added import
 import json
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ dashboard_bp = Blueprint("dashboard_bp", __name__, url_prefix="/api")
 
 
 @dashboard_bp.route("/dashboard", methods=["GET"])
+@auth.login_required               # <-- added decorator
 def dashboard_api():
     """
     Fraud monitoring dashboard API with correct counting.
