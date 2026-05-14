@@ -98,50 +98,50 @@ class XceptionDeepfakeDetector:
             magnitude = 20 * np.log(np.abs(fshift) + 1e-8)
             freq_std = float(np.std(magnitude))
             freq_score = 0.0
-            if freq_std < 6.5:
+            if freq_std < 5.0:
                 freq_score = 0.85
-            elif freq_std < 8.0:
-                freq_score = 0.65
-            elif freq_std < 10.0:
-                freq_score = 0.45
+            elif freq_std < 6.5:
+                freq_score = 0.60
+            elif freq_std < 8.5:
+                freq_score = 0.35
             else:
-                freq_score = 0.15
+                freq_score = 0.10
 
             # Texture analysis
             lap = cv2.Laplacian(gray, cv2.CV_64F)
             texture_var = float(lap.var())
             texture_score = 0.0
-            if texture_var < 35:
+            if texture_var < 20:
                 texture_score = 0.85
-            elif texture_var < 50:
-                texture_score = 0.65
-            elif texture_var < 75:
-                texture_score = 0.45
+            elif texture_var < 35:
+                texture_score = 0.60
+            elif texture_var < 55:
+                texture_score = 0.35
             else:
-                texture_score = 0.15
+                texture_score = 0.10
 
             # Noise analysis
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             noise = gray - blurred
             noise_std = float(np.std(noise))
             noise_score = 0.0
-            if noise_std < 2.0:
+            if noise_std < 1.2:
                 noise_score = 0.85
-            elif noise_std < 3.2:
-                noise_score = 0.65
+            elif noise_std < 2.0:
+                noise_score = 0.50
             else:
-                noise_score = 0.15
+                noise_score = 0.10
 
             # Edge analysis
             edges = cv2.Canny(gray, 50, 150)
             edge_density = np.sum(edges > 0) / edges.size
             edge_score = 0.0
-            if edge_density > 0.13:
-                edge_score = 0.75
-            elif edge_density < 0.014:
+            if edge_density > 0.18:
+                edge_score = 0.65
+            elif edge_density < 0.008:
                 edge_score = 0.65
             else:
-                edge_score = 0.15
+                edge_score = 0.10
 
             # Color analysis
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
