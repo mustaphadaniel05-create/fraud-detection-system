@@ -38,7 +38,7 @@ mp_face_detection = mp.solutions.face_detection
 _FACE_DETECTION = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 
 # ----------------------------------------------------------------------
-# Utility functions (unchanged except _log_verification)
+# Utility functions (unchanged)
 # ----------------------------------------------------------------------
 def _detect_faces(frame: np.ndarray) -> List:
     if frame is None or frame.size == 0: return []
@@ -91,7 +91,7 @@ def _get_face_size_percentage(frame: np.ndarray, detections: List) -> Optional[f
     face_width = int(bbox.width * w)
     return (face_width / w) * 100
 
-# CORRECTED: now includes risk_score and details
+# ========== UPDATED: Now includes risk_score and details ==========
 def _log_verification(user_id: Optional[int], similarity: float, status: str, risk_score: int = 0, details: Dict = None) -> None:
     try:
         details_json = json.dumps(details) if details else None
@@ -207,7 +207,6 @@ def _check_frequency_anomalies(frame: np.ndarray) -> Tuple[bool, float]:
 
 # ----------------------------------------------------------------------
 # MAIN VERIFICATION FUNCTION with friendly deepfake messages
-# (calls to _log_verification updated to include risk_score and details)
 # ----------------------------------------------------------------------
 def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     email = data.get("email", "").strip().lower()
@@ -324,7 +323,6 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     logger.info(f"Face matched: {email} (sim={similarity:.3f})")
 
     # ========== DEEPFAKE CHECKS – all return friendly message ==========
-    # (Each deepfake detection call includes _log_verification with risk_score=85 and details)
 
     # Frequency anomaly
     is_freq, freq_score = _check_frequency_anomalies(best_frame)
@@ -444,6 +442,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                 "face_width_percentage": round(face_width_pct, 1) if face_width_pct else None
             }, 200
     elif decision == "REQUIRES_ACTIVE_LIVENESS":
+        # Log with risk_score even though it's not a final rejection
         _log_verification(user_id, similarity, "REQUIRES_ACTIVE", risk_score=risk_score, details={"decision": decision})
         return {
             "status": "REQUIRES_ACTIVE", "decision": decision, "risk_score": risk_score,
