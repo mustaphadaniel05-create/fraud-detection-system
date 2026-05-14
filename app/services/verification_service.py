@@ -38,7 +38,7 @@ mp_face_detection = mp.solutions.face_detection
 _FACE_DETECTION = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 
 # ----------------------------------------------------------------------
-# Utility functions (unchanged)
+# Utility functions (unchanged except _log_verification)
 # ----------------------------------------------------------------------
 def _detect_faces(frame: np.ndarray) -> List:
     if frame is None or frame.size == 0: return []
@@ -91,14 +91,22 @@ def _get_face_size_percentage(frame: np.ndarray, detections: List) -> Optional[f
     face_width = int(bbox.width * w)
     return (face_width / w) * 100
 
-def _log_verification(user_id: Optional[int], similarity: float, status: str, details: Dict = None) -> None:
+# CORRECTED: now includes risk_score and details
+def _log_verification(user_id: Optional[int], similarity: float, status: str, risk_score: int = 0, details: Dict = None) -> None:
     try:
+        details_json = json.dumps(details) if details else None
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 if user_id is None or user_id == 0:
-                    cursor.execute("INSERT INTO verification_logs (user_id, similarity_score, status, created_at) VALUES (NULL, %s, %s, NOW())", (similarity, status))
+                    cursor.execute(
+                        "INSERT INTO verification_logs (user_id, similarity_score, status, risk_score, details, created_at) VALUES (NULL, %s, %s, %s, %s, NOW())",
+                        (similarity, status, risk_score, details_json)
+                    )
                 else:
-                    cursor.execute("INSERT INTO verification_logs (user_id, similarity_score, status, created_at) VALUES (%s, %s, %s, NOW())", (user_id, similarity, status))
+                    cursor.execute(
+                        "INSERT INTO verification_logs (user_id, similarity_score, status, risk_score, details, created_at) VALUES (%s, %s, %s, %s, %s, NOW())",
+                        (user_id, similarity, status, risk_score, details_json)
+                    )
                 conn.commit()
     except Exception as e:
         logger.error(f"Logging error: {e}")
@@ -199,6 +207,7 @@ def _check_frequency_anomalies(frame: np.ndarray) -> Tuple[bool, float]:
 
 # ----------------------------------------------------------------------
 # MAIN VERIFICATION FUNCTION with friendly deepfake messages
+# (calls to _log_verification updated to include risk_score and details)
 # ----------------------------------------------------------------------
 def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     email = data.get("email", "").strip().lower()
@@ -215,7 +224,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     email_exists, user_id_from_db, full_name_from_db = _check_email_exists(email)
     if not email_exists:
         logger.warning(f"Email not registered: {email}")
-        _log_verification(None, 0.0, "REJECTED", {"reason": "Email not registered"})
+        _log_verification(None, 0.0, "REJECTED", risk_score=0, details={"reason": "Email not registered"})
         return {"status": "REJECTED", "reason": "Email not registered. Please enroll first."}, 200
 
     # STEP 2: rate limiting
@@ -315,12 +324,13 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     logger.info(f"Face matched: {email} (sim={similarity:.3f})")
 
     # ========== DEEPFAKE CHECKS – all return friendly message ==========
+    # (Each deepfake detection call includes _log_verification with risk_score=85 and details)
 
     # Frequency anomaly
     is_freq, freq_score = _check_frequency_anomalies(best_frame)
     if is_freq:
         logger.warning(f"Frequency anomaly: score={freq_score}")
-        _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": "frequency_anomaly"})
+        _log_verification(user_id, 0.0, "DEEPFAKE", risk_score=85, details={"reason": "frequency_anomaly"})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", "frequency anomaly", 85, attempts, similarity, 0.7, 0.85, freq_score)
         return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
@@ -328,7 +338,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     is_temp, temp_score, temp_reason = _analyze_temporal_consistency(frames)
     if is_temp:
         logger.warning(f"Temporal anomaly: {temp_reason}")
-        _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": temp_reason})
+        _log_verification(user_id, 0.0, "DEEPFAKE", risk_score=85, details={"reason": temp_reason})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", temp_reason, 85, attempts, similarity, 0.7, 0.85, temp_score)
         return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
@@ -339,7 +349,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             conf = swap.get("confidence", 0)
             reasons = swap.get("reasons", [])
             logger.warning(f"Face-swap detected: conf={conf}, reasons={reasons}")
-            _log_verification(user_id, 0.0, "DEEPFAKE", {"reason": "face_swap"})
+            _log_verification(user_id, 0.0, "DEEPFAKE", risk_score=85, details={"reason": "face_swap"})
             _check_and_send_alerts(email, client_ip, "DEEPFAKE", "face_swap", 85, attempts, similarity, 0.7, 0.85, conf)
             return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception as e:
@@ -353,7 +363,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             deepfake_confidence = deepfake_result.get("confidence", 0.15)
             if deepfake_confidence > Config.DEEPFAKE_THRESHOLD:
                 logger.warning(f"XceptionNet deepfake: conf={deepfake_confidence}")
-                _log_verification(user_id, 0.0, "DEEPFAKE", {"deepfake_confidence": deepfake_confidence})
+                _log_verification(user_id, 0.0, "DEEPFAKE", risk_score=85, details={"deepfake_confidence": deepfake_confidence})
                 _check_and_send_alerts(email, client_ip, "DEEPFAKE", "XceptionNet deepfake", 85, attempts, similarity, 0.7, 0.85, deepfake_confidence)
                 return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception as e:
@@ -363,7 +373,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     is_incon, cons_score, cons_reason = _check_face_consistency(frames)
     if is_incon:
         logger.warning(f"Face inconsistency: {cons_reason}")
-        _log_verification(user_id, similarity, "DEEPFAKE", {"reason": cons_reason})
+        _log_verification(user_id, similarity, "DEEPFAKE", risk_score=85, details={"reason": cons_reason})
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", cons_reason, 85, attempts, similarity, 0.7, 0.85, cons_score)
         return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
@@ -412,7 +422,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     # Step 21: decision handling
     if decision == "APPROVED_PASSIVE":
         status = "VERIFIED"
-        _log_verification(user_id, similarity, status.lower())
+        _log_verification(user_id, similarity, status.lower(), risk_score=risk_score, details={"decision": decision})
         try:
             jwt_service = get_jwt_service()
             user_data = {'user_id': user_id, 'email': email, 'full_name': full_name_from_db or email.split('@')[0]}
@@ -434,6 +444,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                 "face_width_percentage": round(face_width_pct, 1) if face_width_pct else None
             }, 200
     elif decision == "REQUIRES_ACTIVE_LIVENESS":
+        _log_verification(user_id, similarity, "REQUIRES_ACTIVE", risk_score=risk_score, details={"decision": decision})
         return {
             "status": "REQUIRES_ACTIVE", "decision": decision, "risk_score": risk_score,
             "similarity": round(similarity, 3), "liveness_confidence": round(liveness_conf, 2),
@@ -441,5 +452,5 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             "face_width_percentage": round(face_width_pct, 1) if face_width_pct else None
         }, 200
     else:
-        _log_verification(user_id, similarity, "BLOCKED", {"risk_score": risk_score})
+        _log_verification(user_id, similarity, "BLOCKED", risk_score=risk_score, details={"decision": decision})
         return {"status": "BLOCKED", "reason": "Risk score too high. Please try again."}, 200
