@@ -2,7 +2,6 @@ Flask==3.0.0
 flask-cors==4.0.1
 flask-limiter==3.5.0
 flask-mail==0.9.1
-flask-httpauth==4.1.0
 PyMySQL==1.1.0
 redis==5.0.0
 python-dotenv==1.0.0
