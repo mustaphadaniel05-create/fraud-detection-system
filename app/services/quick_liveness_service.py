@@ -1,7 +1,7 @@
 """
 Quick liveness detection – FORGIVING FOR REAL FACES.
-Requires at least 1 blink (eyes closed for 1 frame) to pass.
-Uses a higher EAR threshold (0.25) for easier blink detection.
+- Requires at least 1 blink OR significant eye movement (ear_variation > 0.05)
+- Static photos have very low ear variation (<0.01) and no blink
 """
 
 import logging
@@ -25,11 +25,12 @@ _face_mesh = mp_face_mesh.FaceMesh(
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
-# MORE FORGIVING THRESHOLDS
-EAR_THRESHOLD = 0.25            # increased from 0.22
+# Forgiving thresholds
+EAR_THRESHOLD = 0.22
 MIN_CONSECUTIVE_FRAMES = 1
 REQUIRED_BLINKS = 1
-STATIC_VARIATION_THRESHOLD = 0.018
+STATIC_VARIATION_THRESHOLD = 0.018   # below this → static photo
+LIVE_VARIATION_THRESHOLD = 0.05      # above this → even without blink, accept as live (eye movement)
 MIN_FRAMES_FOR_LIVENESS = 6
 
 def _eye_aspect_ratio(landmarks, eye_indices, frame_w, frame_h) -> float:
@@ -97,6 +98,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
 
     logger.info(f"Liveness results: blinks={real_blinks}, ear_var={ear_variation:.4f}")
 
+    # Multiple faces → spoof
     if multiple_faces_detected:
         return {
             "is_live": False,
@@ -105,6 +107,7 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
             "reason": "Multiple faces detected"
         }
 
+    # Real blink → definitely live
     if real_blinks >= REQUIRED_BLINKS:
         return {
             "is_live": True,
@@ -113,14 +116,27 @@ def check_liveness(frames: List[np.ndarray]) -> Dict[str, Any]:
             "reason": f"Live face: {real_blinks} blink(s)"
         }
 
+    # If no blink but high ear variation → natural eye movement, likely live
+    if frames_with_face > 0 and ear_variation >= LIVE_VARIATION_THRESHOLD:
+        logger.info(f"Accepting as live due to eye movement (ear_var={ear_variation:.4f})")
+        return {
+            "is_live": True,
+            "blinks_detected": 0,
+            "ear_variation": ear_variation,
+            "reason": "Live face (eye movement detected)"
+        }
+
+    # Static photo: very low variation and no blink
+    if frames_with_face > 0 and ear_variation < STATIC_VARIATION_THRESHOLD:
+        return {
+            "is_live": False,
+            "blinks_detected": 0,
+            "ear_variation": ear_variation,
+            "reason": "Static photo – no eye movement"
+        }
+
+    # Real face but didn't blink or move enough (maybe user was very still)
     if frames_with_face > 0:
-        if real_blinks == 0 and ear_variation < STATIC_VARIATION_THRESHOLD:
-            return {
-                "is_live": False,
-                "blinks_detected": 0,
-                "ear_variation": ear_variation,
-                "reason": "Static photo – no eye movement"
-            }
         return {
             "is_live": False,
             "blinks_detected": 0,
