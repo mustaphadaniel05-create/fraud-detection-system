@@ -442,8 +442,6 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                 "face_width_percentage": round(face_width_pct, 1) if face_width_pct else None
             }, 200
     elif decision == "REQUIRES_ACTIVE_LIVENESS":
-        # Log with risk_score even though it's not a final rejection
-        _log_verification(user_id, similarity, "REQUIRES_ACTIVE", risk_score=risk_score, details={"decision": decision})
         return {
             "status": "REQUIRES_ACTIVE", "decision": decision, "risk_score": risk_score,
             "similarity": round(similarity, 3), "liveness_confidence": round(liveness_conf, 2),
