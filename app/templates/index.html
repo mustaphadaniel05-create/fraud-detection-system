@@ -86,12 +86,12 @@
             <!-- Logo that links to home -->
             <a href="/" class="text-xl font-bold hover:text-indigo-200 transition">AI Fraud Detection</a>
             
-            <!-- Desktop Navigation -->
+            <!-- Desktop Navigation (Dashboard link removed) -->
             <nav class="hidden md:flex items-center space-x-6">
                 <a href="/" class="nav-link hover:underline" id="nav-home">Home</a>
                 <a href="/enroll" class="nav-link hover:underline" id="nav-enroll">Enroll</a>
                 <a href="/verify" class="nav-link hover:underline" id="nav-verify">Verify</a>
-                <a href="/dashboard" class="nav-link hover:underline" id="nav-dashboard">Dashboard</a>
+                <!-- Dashboard link removed -->
             </nav>
             
             <!-- Mobile Menu Button (Three lines) -->
@@ -100,7 +100,7 @@
             </button>
         </div>
         
-        <!-- Mobile Navigation Menu -->
+        <!-- Mobile Navigation Menu (Dashboard link removed) -->
         <div id="mobile-menu" class="md:hidden">
             <div class="flex flex-col space-y-3 py-3">
                 <a href="/" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-home">
@@ -112,9 +112,7 @@
                 <a href="/verify" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-verify">
                     <i class="fas fa-check-circle mr-2"></i>Verify
                 </a>
-                <a href="/dashboard" class="nav-link block px-3 py-2 rounded hover:bg-indigo-600 transition" id="mobile-nav-dashboard">
-                    <i class="fas fa-chart-line mr-2"></i>Dashboard
-                </a>
+                <!-- Dashboard link removed -->
             </div>
         </div>
     </div>
@@ -154,10 +152,7 @@ class="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-lg shadow-lg
 Verify Identity
 </a>
 
-<a href="/dashboard"
-class="bg-gray-800 hover:bg-gray-900 text-white px-8 py-4 rounded-lg shadow-lg text-lg">
-System Dashboard
-</a>
+<!-- System Dashboard button removed -->
 
 </div>
 
@@ -200,7 +195,7 @@ Identifies suspicious activity and prevents identity fraud,
 photo attacks, and replay attacks.
 </p>
 <div class="mt-4">
-<a href="/dashboard" class="text-indigo-600 dark:text-indigo-400 hover:underline">View dashboard →</a>
+<!-- View dashboard link removed -->
 </div>
 </div>
 
@@ -242,12 +237,12 @@ if (menuBtn) {
 function highlightActiveLink() {
     const currentPath = window.location.pathname;
     
-    // Desktop navigation
+    // Desktop navigation (Dashboard path removed)
     const navLinks = {
         '/': ['nav-home', 'mobile-nav-home'],
         '/enroll': ['nav-enroll', 'mobile-nav-enroll'],
-        '/verify': ['nav-verify', 'mobile-nav-verify'],
-        '/dashboard': ['nav-dashboard', 'mobile-nav-dashboard']
+        '/verify': ['nav-verify', 'mobile-nav-verify']
+        // Dashboard entry removed
     };
     
     // Remove active class from all links first
