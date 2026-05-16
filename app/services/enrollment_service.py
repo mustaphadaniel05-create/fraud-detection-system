@@ -1,6 +1,8 @@
 """
-Enrollment service – EXTREMELY STRICT + FACE UNIQUENESS CHECK.
-Rejects multi‑face images and faces already enrolled under another email.
+Enrollment service – STRICT FRONTAL FACE + FACE UNIQUENESS CHECK.
+- Requires near-frontal pose (yaw, pitch, roll within 12°)
+- Rejects faces already enrolled under any email (returns conflicting email)
+- Forgiving on quality (brightness, contrast, blur) but strict on pose and uniqueness
 """
 
 import json
@@ -35,26 +37,28 @@ face_detection = mp_face_detection.FaceDetection(
 TARGET_SIZE = (160, 160)
 
 # =========================================================
-# ENROLLMENT THRESHOLDS (strict)
+# ENROLLMENT THRESHOLDS
 # =========================================================
 
-ENROLL_CLARITY_THRESHOLD = 70.0
-ENROLL_BRIGHTNESS_MIN = 65
-ENROLL_BRIGHTNESS_MAX = 205
-ENROLL_CONTRAST_MIN = 35
-ENROLL_FACE_SIZE_MIN = 20
-ENROLL_FACE_SIZE_MAX = 48
+# Frontal pose – STRICT (user must look straight)
+MAX_YAW = 12
+MAX_PITCH = 12
+MAX_ROLL = 12
 
-# Frontal pose limits
-MAX_YAW = 20
-MAX_PITCH = 20
-MAX_ROLL = 25
+# Quality – FORGIVING (only reject extreme cases)
+ENROLL_CLARITY_THRESHOLD = 35.0
+ENROLL_BRIGHTNESS_MIN = 25
+ENROLL_BRIGHTNESS_MAX = 245
+ENROLL_CONTRAST_MIN = 15
 
-# Face‑uniqueness threshold
-FACE_UNIQUENESS_THRESHOLD = 0.75   # if similarity to any existing user > 0.75, reject
+ENROLL_FACE_SIZE_MIN = 18
+ENROLL_FACE_SIZE_MAX = 55
+
+# Face uniqueness (strict)
+FACE_UNIQUENESS_THRESHOLD = 0.75   # if similarity > 0.75 → same face
 
 # =========================================================
-# HEAD POSE ESTIMATION (same as before)
+# HEAD POSE ESTIMATION
 # =========================================================
 
 def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
@@ -127,7 +131,7 @@ def _check_head_pose(image: np.ndarray) -> Tuple[bool, str, Dict]:
     return ok, msg, pose
 
 # =========================================================
-# QUALITY CHECKS
+# QUALITY CHECKS (forgiving)
 # =========================================================
 
 def _check_clarity(image: np.ndarray) -> Tuple[bool, str, float]:
@@ -220,7 +224,7 @@ def _crop_face(image: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[tuple]
         return None, None
 
 # =========================================================
-# EMBEDDING & UNIQUENESS CHECK
+# EMBEDDING & UNIQUENESS CHECK (strict)
 # =========================================================
 
 def _generate_embedding(image: np.ndarray) -> Optional[np.ndarray]:
@@ -272,8 +276,8 @@ def _check_face_uniqueness(embedding: np.ndarray, exclude_email: str = None) -> 
         for u in users:
             stored_emb = np.array(json.loads(u["face_embedding"]), dtype=np.float32)
             stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-10)
-            sim = float(np.dot(embedding, stored_emb))  # cosine similarity (raw, -1..1)
-            scaled_sim = (sim + 1) / 2  # convert to 0..1
+            sim = float(np.dot(embedding, stored_emb))  # raw cosine
+            scaled_sim = (sim + 1) / 2
             logger.info(f"Uniqueness check vs {u['email']}: raw={sim:.4f}, scaled={scaled_sim:.4f}")
             if scaled_sim > best_sim:
                 best_sim = scaled_sim
@@ -294,7 +298,6 @@ def _has_multiple_faces(image: np.ndarray) -> bool:
         results = face_detection.process(rgb)
         if not results or not results.detections:
             return False
-        # Count faces with confidence > 0.6
         count = sum(1 for d in results.detections if d.score[0] > 0.6)
         return count > 1
     except Exception as e:
@@ -317,19 +320,17 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if image is None:
         return {"status": "error", "message": "Invalid image"}, 400
 
-    # =========================================================
-    # 1. MULTIPLE FACES CHECK
-    # =========================================================
+    # 1. MULTIPLE FACES
     if _has_multiple_faces(image):
-        logger.warning(f"Multiple faces detected during enrollment for {email}")
+        logger.warning(f"Multiple faces detected for {email}")
         return {"status": "error", "message": "Multiple faces detected. Please provide a single clear face."}, 400
 
     enhanced = _enhance_image(image)
     cropped_face, face_box = _crop_face(enhanced)
     if cropped_face is None:
-        return {"status": "error", "message": "No face detected"}, 400
+        return {"status": "error", "message": "No face detected. Please ensure your face is clearly visible."}, 400
 
-    # Quality checks
+    # Quality (forgiving)
     clear, msg, _ = _check_clarity(cropped_face)
     if not clear:
         return {"status": "error", "message": msg}, 400
@@ -346,18 +347,18 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if not ok:
         return {"status": "error", "message": msg}, 400
 
-    ok, msg, _ = _check_head_pose(cropped_face)
+    # 2. STRICT FRONTAL POSE
+    ok, msg, pose = _check_head_pose(cropped_face)
     if not ok:
-        return {"status": "error", "message": msg}, 400
+        logger.warning(f"Frontal pose required for {email}: {msg}")
+        return {"status": "error", "message": "Please look directly at the camera (face must be frontal). " + msg}, 400
 
     # Generate embedding
     embedding = _generate_embedding(cropped_face)
     if embedding is None:
-        return {"status": "error", "message": "Failed to process face"}, 400
+        return {"status": "error", "message": "Failed to process face. Please try again with better lighting."}, 400
 
-    # =========================================================
-    # 2. UNIQUENESS CHECK (face not already enrolled)
-    # =========================================================
+    # 3. UNIQUENESS CHECK (face already enrolled?)
     is_unique, conflicting_email, similarity = _check_face_uniqueness(embedding, exclude_email=email)
     if not is_unique:
         logger.warning(f"Face already registered with {conflicting_email} (sim={similarity:.3f})")
@@ -367,7 +368,6 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # Check if email already exists
                 cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
                 if cursor.fetchone():
                     return {"status": "error", "message": "Email already registered"}, 409
@@ -380,4 +380,4 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
         return {"status": "success", "message": "Enrollment successful"}, 201
     except Exception as e:
         logger.exception(f"Enrollment error: {e}")
-        return {"status": "error", "message": "Enrollment failed"}, 500
+        return {"status": "error", "message": "Enrollment failed due to server error"}, 500
