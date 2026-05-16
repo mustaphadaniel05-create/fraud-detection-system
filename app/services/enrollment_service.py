@@ -41,9 +41,12 @@ TARGET_SIZE = (160, 160)
 # =========================================================
 
 # Frontal pose – STRICT (user must look straight)
-MAX_YAW = 2
-MAX_PITCH = 2
-MAX_ROLL = 2
+MAX_YAW = 1
+MAX_PITCH = 1
+MAX_ROLL = 1
+
+MAX_ANGLE_SUM = 2
+
 
 # Quality – FORGIVING (only reject extreme cases)
 ENROLL_CLARITY_THRESHOLD = 35.0
@@ -124,10 +127,14 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
 def _check_head_pose(image: np.ndarray) -> Tuple[bool, str, Dict]:
     pose = _estimate_head_pose(image)
     yaw, pitch, roll = abs(pose["yaw"]), abs(pose["pitch"]), abs(pose["roll"])
-    ok = (yaw <= MAX_YAW and pitch <= MAX_PITCH and roll <= MAX_ROLL)
-    msg = f"Head pose: yaw={pose['yaw']}°, pitch={pose['pitch']}°, roll={pose['roll']}°"
+    angle_sum = yaw + pitch + roll
+    ok = (yaw <= MAX_YAW and pitch <= MAX_PITCH and roll <= MAX_ROLL and angle_sum <= MAX_ANGLE_SUM)
+    msg = f"Head pose: yaw={pose['yaw']}°, pitch={pose['pitch']}°, roll={pose['roll']}° (sum={angle_sum:.1f}°)"
     if not ok:
-        msg = f"Please look straight at the camera. {msg}"
+        if angle_sum > MAX_ANGLE_SUM:
+            msg = f"Face is not perfectly straight. {msg}"
+        else:
+            msg = f"Please look directly at the camera. {msg}"
     return ok, msg, pose
 
 # =========================================================
