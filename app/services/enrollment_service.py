@@ -1,15 +1,15 @@
 """
-Enrollment service – STRICT FRONTAL FACE + FACE UNIQUENESS CHECK.
-- Requires near-frontal pose (yaw, pitch, roll within 12°)
-- Rejects faces already enrolled under any email (returns conflicting email)
-- Forgiving on quality (brightness, contrast, blur) but strict on pose and uniqueness
+Enrollment service – FORGIVING MODE.
+- Accepts non‑frontal faces (up to 20° yaw/pitch/roll)
+- Very lenient on face size, brightness, contrast
+- Still rejects duplicate faces (security)
 """
 
 import json
 import logging
 import tempfile
 import os
-from typing import Tuple, Dict, Any, Optional, List
+from typing import Tuple, Dict, Any, Optional
 
 import cv2
 import numpy as np
@@ -26,9 +26,7 @@ logger = logging.getLogger(__name__)
 # =========================================================
 # MEDIAPIPE FACE DETECTOR
 # =========================================================
-
 mp_face_detection = mp.solutions.face_detection
-
 face_detection = mp_face_detection.FaceDetection(
     model_selection=0,
     min_detection_confidence=0.85
@@ -37,33 +35,31 @@ face_detection = mp_face_detection.FaceDetection(
 TARGET_SIZE = (160, 160)
 
 # =========================================================
-# ENROLLMENT THRESHOLDS
+# FORGIVING THRESHOLDS
 # =========================================================
 
-# Frontal pose – STRICT (user must look straight)
-MAX_YAW = 1
-MAX_PITCH = 1
-MAX_ROLL = 1
+# Pose – very forgiving (accept almost any angle)
+MAX_YAW = 20
+MAX_PITCH = 20
+MAX_ROLL = 20
+# No sum condition
 
-MAX_ANGLE_SUM = 2
+# Quality – extremely forgiving
+ENROLL_CLARITY_THRESHOLD = 20.0      # was 35 – accept slightly blurry
+ENROLL_BRIGHTNESS_MIN = 15           # was 25 – accept darker
+ENROLL_BRIGHTNESS_MAX = 250          # was 245 – accept very bright
+ENROLL_CONTRAST_MIN = 8              # was 15 – accept low contrast
 
+# Face size – forgiving for mobile users
+ENROLL_FACE_SIZE_MIN = 12            # was 18 – accept smaller faces
+ENROLL_FACE_SIZE_MAX = 65            # was 55 – accept closer faces
 
-# Quality – FORGIVING (only reject extreme cases)
-ENROLL_CLARITY_THRESHOLD = 35.0
-ENROLL_BRIGHTNESS_MIN = 25
-ENROLL_BRIGHTNESS_MAX = 245
-ENROLL_CONTRAST_MIN = 15
-
-ENROLL_FACE_SIZE_MIN = 18
-ENROLL_FACE_SIZE_MAX = 55
-
-# Face uniqueness (strict)
-FACE_UNIQUENESS_THRESHOLD = 0.75   # if similarity > 0.75 → same face
+# Uniqueness (strict – do not change)
+FACE_UNIQUENESS_THRESHOLD = 0.75
 
 # =========================================================
-# HEAD POSE ESTIMATION
+# HEAD POSE (same logic, wider limits)
 # =========================================================
-
 def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
     try:
         mp_face_mesh = mp.solutions.face_mesh
@@ -127,27 +123,22 @@ def _estimate_head_pose(image: np.ndarray) -> Dict[str, float]:
 def _check_head_pose(image: np.ndarray) -> Tuple[bool, str, Dict]:
     pose = _estimate_head_pose(image)
     yaw, pitch, roll = abs(pose["yaw"]), abs(pose["pitch"]), abs(pose["roll"])
-    angle_sum = yaw + pitch + roll
-    ok = (yaw <= MAX_YAW and pitch <= MAX_PITCH and roll <= MAX_ROLL and angle_sum <= MAX_ANGLE_SUM)
-    msg = f"Head pose: yaw={pose['yaw']}°, pitch={pose['pitch']}°, roll={pose['roll']}° (sum={angle_sum:.1f}°)"
+    ok = (yaw <= MAX_YAW and pitch <= MAX_PITCH and roll <= MAX_ROLL)
+    msg = f"Head pose: yaw={pose['yaw']}°, pitch={pose['pitch']}°, roll={pose['roll']}°"
     if not ok:
-        if angle_sum > MAX_ANGLE_SUM:
-            msg = f"Face is not perfectly straight. {msg}"
-        else:
-            msg = f"Please look directly at the camera. {msg}"
+        msg = f"Please look roughly at the camera. {msg}"
     return ok, msg, pose
 
 # =========================================================
 # QUALITY CHECKS (forgiving)
 # =========================================================
-
 def _check_clarity(image: np.ndarray) -> Tuple[bool, str, float]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
     is_clear = lap_var >= ENROLL_CLARITY_THRESHOLD
     msg = f"Sharpness={lap_var:.1f} (need ≥ {ENROLL_CLARITY_THRESHOLD})"
     if not is_clear:
-        msg += " — Hold camera still and improve focus."
+        msg += " — Hold camera still."
     logger.info(f"Enrollment clarity: {lap_var:.1f} -> {'PASS' if is_clear else 'FAIL'}")
     return is_clear, msg, lap_var
 
@@ -178,9 +169,8 @@ def _check_face_size(face_box: tuple, frame_shape: tuple) -> Tuple[bool, str, fl
     return True, f"Face size OK ({pct:.0f}%)", pct
 
 # =========================================================
-# IMAGE ENHANCEMENT & FACE CROP
+# IMAGE ENHANCEMENT & CROP (unchanged)
 # =========================================================
-
 def _enhance_image(image: np.ndarray) -> np.ndarray:
     if image is None: return image
     try:
@@ -202,7 +192,6 @@ def _crop_face(image: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[tuple]
         results = face_detection.process(rgb)
         if not results or not results.detections:
             return None, None
-        # Get largest face
         detection = max(results.detections, key=lambda d:
                         d.location_data.relative_bounding_box.width *
                         d.location_data.relative_bounding_box.height)
@@ -231,9 +220,8 @@ def _crop_face(image: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[tuple]
         return None, None
 
 # =========================================================
-# EMBEDDING & UNIQUENESS CHECK (strict)
+# EMBEDDING & UNIQUENESS (strict – unchanged)
 # =========================================================
-
 def _generate_embedding(image: np.ndarray) -> Optional[np.ndarray]:
     temp_path = None
     try:
@@ -257,17 +245,10 @@ def _generate_embedding(image: np.ndarray) -> Optional[np.ndarray]:
         logger.error(f"Embedding error: {e}")
         return None
     finally:
-        try:
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
-        except:
-            pass
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 def _check_face_uniqueness(embedding: np.ndarray, exclude_email: str = None) -> Tuple[bool, Optional[str], float]:
-    """
-    Compare embedding against all existing users.
-    Returns (is_unique, conflicting_email, highest_similarity)
-    """
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
@@ -283,9 +264,8 @@ def _check_face_uniqueness(embedding: np.ndarray, exclude_email: str = None) -> 
         for u in users:
             stored_emb = np.array(json.loads(u["face_embedding"]), dtype=np.float32)
             stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-10)
-            sim = float(np.dot(embedding, stored_emb))  # raw cosine
+            sim = float(np.dot(embedding, stored_emb))
             scaled_sim = (sim + 1) / 2
-            logger.info(f"Uniqueness check vs {u['email']}: raw={sim:.4f}, scaled={scaled_sim:.4f}")
             if scaled_sim > best_sim:
                 best_sim = scaled_sim
                 best_email = u["email"]
@@ -298,7 +278,6 @@ def _check_face_uniqueness(embedding: np.ndarray, exclude_email: str = None) -> 
 # =========================================================
 # MULTIPLE FACE DETECTION
 # =========================================================
-
 def _has_multiple_faces(image: np.ndarray) -> bool:
     try:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -314,7 +293,6 @@ def _has_multiple_faces(image: np.ndarray) -> bool:
 # =========================================================
 # MAIN ENROLLMENT
 # =========================================================
-
 def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str, Any], int]:
     email = (email or "").strip().lower()
     full_name = (full_name or "").strip()
@@ -327,17 +305,16 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if image is None:
         return {"status": "error", "message": "Invalid image"}, 400
 
-    # 1. MULTIPLE FACES
+    # 1. Multiple faces
     if _has_multiple_faces(image):
-        logger.warning(f"Multiple faces detected for {email}")
-        return {"status": "error", "message": "Multiple faces detected. Please provide a single clear face."}, 400
+        return {"status": "error", "message": "Multiple faces detected"}, 400
 
     enhanced = _enhance_image(image)
     cropped_face, face_box = _crop_face(enhanced)
     if cropped_face is None:
-        return {"status": "error", "message": "No face detected. Please ensure your face is clearly visible."}, 400
+        return {"status": "error", "message": "No face detected"}, 400
 
-    # Quality (forgiving)
+    # Quality checks (forgiving)
     clear, msg, _ = _check_clarity(cropped_face)
     if not clear:
         return {"status": "error", "message": msg}, 400
@@ -354,22 +331,20 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
     if not ok:
         return {"status": "error", "message": msg}, 400
 
-    # 2. STRICT FRONTAL POSE
-    ok, msg, pose = _check_head_pose(cropped_face)
+    # Pose check (forgiving)
+    ok, msg, _ = _check_head_pose(cropped_face)
     if not ok:
-        logger.warning(f"Frontal pose required for {email}: {msg}")
-        return {"status": "error", "message": "Please look directly at the camera (face must be frontal). " + msg}, 400
+        return {"status": "error", "message": msg}, 400
 
-    # Generate embedding
+    # Embedding
     embedding = _generate_embedding(cropped_face)
     if embedding is None:
-        return {"status": "error", "message": "Failed to process face. Please try again with better lighting."}, 400
+        return {"status": "error", "message": "Failed to process face"}, 400
 
-    # 3. UNIQUENESS CHECK (face already enrolled?)
+    # Uniqueness
     is_unique, conflicting_email, similarity = _check_face_uniqueness(embedding, exclude_email=email)
     if not is_unique:
-        logger.warning(f"Face already registered with {conflicting_email} (sim={similarity:.3f})")
-        return {"status": "error", "message": f"This face is already registered with email {conflicting_email}. Please use your own face."}, 409
+        return {"status": "error", "message": f"This face is already registered with {conflicting_email}"}, 409
 
     # Save to DB
     try:
@@ -387,4 +362,4 @@ def enroll_user(full_name: str, email: str, image_base64: str) -> Tuple[Dict[str
         return {"status": "success", "message": "Enrollment successful"}, 201
     except Exception as e:
         logger.exception(f"Enrollment error: {e}")
-        return {"status": "error", "message": "Enrollment failed due to server error"}, 500
+        return {"status": "error", "message": "Enrollment failed"}, 500
