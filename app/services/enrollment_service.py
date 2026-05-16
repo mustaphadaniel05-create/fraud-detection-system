@@ -41,9 +41,9 @@ TARGET_SIZE = (160, 160)
 # =========================================================
 
 # Frontal pose – STRICT (user must look straight)
-MAX_YAW = 5
-MAX_PITCH = 5
-MAX_ROLL = 5
+MAX_YAW = 2
+MAX_PITCH = 2
+MAX_ROLL = 2
 
 # Quality – FORGIVING (only reject extreme cases)
 ENROLL_CLARITY_THRESHOLD = 35.0
