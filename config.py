@@ -48,7 +48,7 @@ class Config:
     SIMILARITY_THRESHOLD = 0.75
 
     # =========================================================
-    # DEEPFAKE DETECTION
+    # DEEPFAKE DETECTION – STRICTER
     # =========================================================
 
     DEEPFAKE_MODEL_PATH = os.getenv(
@@ -56,8 +56,8 @@ class Config:
         "models/xception_deepfake.h5"
     )
 
-    DEEPFAKE_THRESHOLD = 0.56
-    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.85
+    DEEPFAKE_THRESHOLD = 0.42  # was 0.56 – much stricter
+    DEEPFAKE_HIGH_CONFIDENCE_THRESHOLD = 0.75  # was 0.85
 
     # =========================================================
     # LIVENESS

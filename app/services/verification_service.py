@@ -1,6 +1,6 @@
 """
 Production-ready face verification service - FRIENDLY MESSAGES
-Returns specific, helpful errors for real-face issues.
+STRICT BLINK REQUIREMENT: at least 1 natural blink needed to pass.
 Deepfake messages are generic "AI-generated face detected."
 """
 
@@ -38,7 +38,7 @@ mp_face_detection = mp.solutions.face_detection
 _FACE_DETECTION = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 
 # ----------------------------------------------------------------------
-# Utility functions (unchanged)
+# Utility functions
 # ----------------------------------------------------------------------
 def _detect_faces(frame: np.ndarray) -> List:
     if frame is None or frame.size == 0: return []
@@ -91,7 +91,6 @@ def _get_face_size_percentage(frame: np.ndarray, detections: List) -> Optional[f
     face_width = int(bbox.width * w)
     return (face_width / w) * 100
 
-# ========== UPDATED: Now includes risk_score and details ==========
 def _log_verification(user_id: Optional[int], similarity: float, status: str, risk_score: int = 0, details: Dict = None) -> None:
     try:
         details_json = json.dumps(details) if details else None
@@ -143,7 +142,7 @@ def _check_email_exists(email: str) -> Tuple[bool, Optional[int], Optional[str]]
         return False, None, None
 
 # ----------------------------------------------------------------------
-# DEEPFAKE DETECTION METHODS (same as before)
+# DEEPFAKE DETECTION METHODS
 # ----------------------------------------------------------------------
 def _analyze_temporal_consistency(frames: List[np.ndarray]) -> Tuple[bool, float, str]:
     if len(frames) < 4: return False, 0.0, "insufficient_frames"
@@ -206,7 +205,7 @@ def _check_frequency_anomalies(frame: np.ndarray) -> Tuple[bool, float]:
         return False, 0.0
 
 # ----------------------------------------------------------------------
-# MAIN VERIFICATION FUNCTION with friendly deepfake messages
+# MAIN VERIFICATION FUNCTION
 # ----------------------------------------------------------------------
 def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     email = data.get("email", "").strip().lower()
@@ -277,10 +276,9 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     else:
         return {"status": "ERROR", "reason": "No face detected. Please look at the camera."}, 200
 
-    # STEP 8: image quality (brightness, contrast, etc.)
+    # STEP 8: image quality
     good_quality, quality_reason, quality_score = QualityService.check_image_quality(best_frame)
     if not good_quality:
-        # Map the quality reason to a friendly message
         if "dark" in quality_reason.lower():
             friendly = "Image is too dark. Please turn on more lights."
         elif "bright" in quality_reason.lower():
@@ -299,17 +297,18 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     if _has_multiple_faces(frames):
         return {"status": "REJECTED", "reason": "Multiple faces detected. Only one person allowed at a time."}, 200
 
-    # STEP 10: quick liveness (blink)
+    # STEP 10: quick liveness (blink) – STRICT: require at least one blink
     try:
         liveness_check = quick_liveness_check(frames)
-        if not liveness_check.get("is_live", False):
-            reason = liveness_check.get("reason", "")
-            if "blink" in reason.lower():
-                return {"status": "REJECTED", "reason": "No blink detected. Please blink naturally during the capture."}, 200
-            else:
-                return {"status": "SPOOF", "reason": "Liveness check failed. Please use your real face."}, 200
+        blinks = liveness_check.get("blinks_detected", 0)
+        if blinks == 0:
+            logger.warning(f"No blink detected – rejecting as deepfake")
+            return {"status": "DEEPFAKE", "reason": "AI-generated face detected. Please blink naturally."}, 200
+        if blinks > 10:
+            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
     except Exception as e:
         logger.error(f"Quick liveness error: {e}")
+        return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
     # STEP 11: face recognition
     face_result = verify_identity(email, best_frame)
@@ -322,8 +321,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     similarity = face_result["similarity"]
     logger.info(f"Face matched: {email} (sim={similarity:.3f})")
 
-    # ========== DEEPFAKE CHECKS – all return friendly message ==========
-
+    # ========== DEEPFAKE CHECKS ==========
     # Frequency anomaly
     is_freq, freq_score = _check_frequency_anomalies(best_frame)
     if is_freq:
@@ -345,8 +343,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         swap = detect_face_swap(best_frame)
         if swap.get("is_fake", False):
             conf = swap.get("confidence", 0)
-            reasons = swap.get("reasons", [])
-            logger.warning(f"Face-swap detected: conf={conf}, reasons={reasons}")
+            logger.warning(f"Face-swap detected: conf={conf}")
             _log_verification(user_id, 0.0, "DEEPFAKE", risk_score=85, details={"reason": "face_swap"})
             _check_and_send_alerts(email, client_ip, "DEEPFAKE", "face_swap", 85, attempts, similarity, 0.7, 0.85, conf)
             return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
@@ -375,22 +372,10 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         _check_and_send_alerts(email, client_ip, "DEEPFAKE", cons_reason, 85, attempts, similarity, 0.7, 0.85, cons_score)
         return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
 
-    # Blink analysis (part of deepfake detection)
-    try:
-        liveness_check = quick_liveness_check(frames)
-        blinks = liveness_check.get("blinks_detected", 0)
-        if blinks == 0:
-            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
-        if blinks > 10:
-            return {"status": "DEEPFAKE", "reason": "AI-generated face detected."}, 200
-    except Exception:
-        pass
-
-    # Step 18: anti-spoof
+    # Anti-spoof
     spoof_result = _ANTISPOOF_SERVICE.check_spoof(best_frame)
     if not spoof_result["is_live"]:
         reason = spoof_result.get('reason', 'Spoof detected')
-        # Map generic spoof reasons to friendly messages
         if "screen" in reason.lower() or "moire" in reason.lower():
             friendly = "Screen reflection detected. Please do not use a screen or printed photo."
         elif "bezel" in reason.lower():
@@ -401,13 +386,13 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             friendly = reason
         return {"status": "SPOOF", "reason": friendly}, 200
 
-    # Step 19: passive liveness
+    # Passive liveness
     liveness_result, is_live = passive_liveness(frames)
     if not is_live:
         return {"status": "SPOOF", "reason": "Liveness check failed – please use your real face."}, 200
     liveness_conf = liveness_result.get("confidence", 0.7)
 
-    # Step 20: risk assessment
+    # Risk assessment
     motion_mean = _frame_motion_score(frames)
     risk_score = calculate_risk(
         similarity=similarity, liveness_confidence=liveness_conf,
@@ -417,7 +402,7 @@ def verify_user(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     )
     decision = decide(risk_score)
 
-    # Step 21: decision handling
+    # Decision handling
     if decision == "APPROVED_PASSIVE":
         status = "VERIFIED"
         _log_verification(user_id, similarity, status.lower(), risk_score=risk_score, details={"decision": decision})

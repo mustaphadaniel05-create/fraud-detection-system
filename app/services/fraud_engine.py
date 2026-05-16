@@ -1,6 +1,6 @@
 """
-BALANCED fraud risk engine with XceptionNet deepfake integration.
-More forgiving thresholds for real enrolled faces.
+FRAUD RISK ENGINE – STRICTER FOR DEEPFAKES.
+Higher penalties for deepfake scores, lower passive approval threshold.
 """
 
 import logging
@@ -21,10 +21,7 @@ def calculate_risk(
     face_width_pct: Optional[float] = None,
 ) -> int:
     """
-    BALANCED risk calculation with more forgiving thresholds for real faces.
-    
-    Returns:
-        risk_score: 0-100 (higher = more risky)
+    STRICTER risk calculation – deepfakes get high risk scores.
     """
     similarity = max(0.0, min(1.0, similarity))
     liveness_confidence = max(0.0, min(1.0, liveness_confidence))
@@ -35,38 +32,33 @@ def calculate_risk(
 
     risk = 0
 
-    # 0. FACE SIZE ADJUSTMENT - More forgiving for normal distances
+    # 0. FACE SIZE ADJUSTMENT
     if face_width_pct is not None:
         if face_width_pct < 12:
-            risk -= 10  # Slightly far - reduce risk
-            logger.info(f"📏 Far face adjustment: -10 (face size {face_width_pct:.1f}%)")
+            risk -= 10
+            logger.info(f"Far face adjustment: -10 (face size {face_width_pct:.1f}%)")
         elif face_width_pct < 15:
-            risk -= 5   # A bit far - small reduction
-            logger.info(f"📏 Slightly far adjustment: -5 (face size {face_width_pct:.1f}%)")
-        elif 20 <= face_width_pct <= 45:
-            risk -= 0   # Good distance - no adjustment
+            risk -= 5
         elif face_width_pct > 50:
-            risk += 5   # Too close - slight penalty
-            logger.info(f"📏 Too close adjustment: +5 (face size {face_width_pct:.1f}%)")
-    
-    # Ensure risk doesn't go negative
+            risk += 5
+            logger.info(f"Too close adjustment: +5 (face size {face_width_pct:.1f}%)")
     risk = max(0, risk)
 
-    # 1. Identity similarity (0-40 points) - MORE FORGIVING
+    # 1. Identity similarity (0-40)
     if similarity >= 0.82:
-        risk += 0      # Excellent match (lowered from 0.85)
+        risk += 0
     elif similarity >= 0.75:
-        risk += 5      # Very good (lowered from 0.78)
+        risk += 5
     elif similarity >= 0.68:
-        risk += 10     # Good (lowered from 0.72)
+        risk += 10
     elif similarity >= 0.60:
-        risk += 18     # Borderline (lowered from 0.65)
+        risk += 18
     elif similarity >= 0.50:
-        risk += 30     # Poor (lowered from 0.55)
+        risk += 30
     else:
-        risk += 45     # Very poor (lowered from 50)
+        risk += 45
 
-    # 2. Liveness confidence (0-35 points) - MORE FORGIVING
+    # 2. Liveness confidence (0-35)
     if liveness_confidence >= 0.80:
         risk += 0
     elif liveness_confidence >= 0.70:
@@ -78,23 +70,20 @@ def calculate_risk(
     else:
         risk += 35
 
-    # 3. Deepfake detection - MORE FORGIVING for real faces
+    # 3. Deepfake detection – STRICTER (higher penalties)
     if deepfake_confidence > 0:
-        # Using XceptionNet
-        if deepfake_confidence >= 0.85:
-            risk += 45   # Very likely deepfake (lowered from 50)
-        elif deepfake_confidence >= 0.75:
-            risk += 35
-        elif deepfake_confidence >= 0.65:
-            risk += 25
+        if deepfake_confidence >= 0.70:
+            risk += 55   # was 45
         elif deepfake_confidence >= 0.55:
-            risk += 15
+            risk += 45   # was 35
         elif deepfake_confidence >= 0.45:
-            risk += 8
+            risk += 35   # was 25
+        elif deepfake_confidence >= 0.35:
+            risk += 20   # was 15
         else:
-            risk += 0
+            risk += 10   # was 8
     else:
-        # Fallback to heuristic vote ratio
+        # Fallback heuristic
         if deepfake_vote_ratio <= 0.25:
             risk += 0
         elif deepfake_vote_ratio <= 0.35:
@@ -106,9 +95,9 @@ def calculate_risk(
         else:
             risk += 35
 
-    # 4. Motion analysis (0-30 points) - MORE FORGIVING
+    # 4. Motion analysis (0-30) – penalize static videos more
     if motion_score >= 3.5:
-        risk += 0      # Good natural movement
+        risk += 0
     elif motion_score >= 2.5:
         risk += 5
     elif motion_score >= 1.5:
@@ -116,9 +105,9 @@ def calculate_risk(
     elif motion_score >= 0.8:
         risk += 18
     else:
-        risk += 30     # Static or minimal movement
+        risk += 30   # static → high risk
 
-    # 5. Recent attempts (0-25 points) - MORE FORGIVING
+    # 5. Recent attempts (0-25)
     if recent_attempts >= 10:
         risk += 25
     elif recent_attempts >= 7:
@@ -127,56 +116,48 @@ def calculate_risk(
         risk += 10
     elif recent_attempts >= 2:
         risk += 5
-    # else: 0
 
-    # Cap at 100
     risk_score = min(int(risk), 100)
-    
-    logger.info(
-        f"📊 BALANCED RISK: {risk_score} | "
-        f"sim={similarity:.2f} | liveness={liveness_confidence:.2f} | "
-        f"df_advanced={deepfake_confidence:.2f} | df_heuristic={deepfake_vote_ratio:.2f} | "
-        f"motion={motion_score:.1f} | attempts={recent_attempts} | "
-        f"face_size={face_width_pct:.1f}%"
-    )
 
+    logger.info(
+        f"STRICT RISK: {risk_score} | sim={similarity:.2f} | liveness={liveness_confidence:.2f} | "
+        f"df={deepfake_confidence:.2f} | motion={motion_score:.1f} | attempts={recent_attempts}"
+    )
     return risk_score
 
 
 def decide(risk_score: int) -> str:
     """
-    BALANCED decision thresholds - MORE FORGIVING:
-    - 0-30: APPROVED_PASSIVE (real faces, high confidence)
-    - 31-55: REQUIRES_ACTIVE (borderline, need active liveness)
-    - 56-80: HIGH_RISK_BLOCK (potential fraud)
-    - 81+: CRITICAL_BLOCK (immediate rejection + permanent flag)
+    STRICTER thresholds:
+    - 0-25: APPROVED_PASSIVE (very high confidence)
+    - 26-50: REQUIRES_ACTIVE
+    - 51-80: HIGH_RISK_BLOCK
+    - 81+: CRITICAL_BLOCK
     """
-    if risk_score <= 30:
-        logger.info(f"✅ PASSIVE APPROVAL: risk={risk_score}")
+    if risk_score <= 25:
+        logger.info(f"PASSIVE APPROVAL: risk={risk_score}")
         return "APPROVED_PASSIVE"
-    
-    if risk_score <= 55:
-        logger.info(f"⚠️ ACTIVE CHALLENGE REQUIRED: risk={risk_score}")
+
+    if risk_score <= 50:
+        logger.info(f"ACTIVE CHALLENGE REQUIRED: risk={risk_score}")
         return "REQUIRES_ACTIVE_LIVENESS"
-    
+
     if risk_score <= 80:
-        logger.warning(f"🚫 HIGH RISK - BLOCKED: risk={risk_score}")
+        logger.warning(f"HIGH RISK - BLOCKED: risk={risk_score}")
         return "BLOCKED_HIGH_RISK"
-    
-    logger.error(f"💀 CRITICAL RISK - PERMANENT FLAG: risk={risk_score}")
+
+    logger.error(f"CRITICAL RISK - PERMANENT FLAG: risk={risk_score}")
     return "CRITICAL_BLOCK"
 
 
 def is_critical_risk(risk_score: int) -> bool:
-    """Check if risk score warrants permanent flagging."""
     return risk_score >= 81
 
 
 def get_risk_level(risk_score: int) -> str:
-    """Get human-readable risk level."""
-    if risk_score <= 30:
+    if risk_score <= 25:
         return "LOW"
-    elif risk_score <= 55:
+    elif risk_score <= 50:
         return "MEDIUM"
     elif risk_score <= 80:
         return "HIGH"

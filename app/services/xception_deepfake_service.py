@@ -1,6 +1,8 @@
 """
 XceptionNet-based deepfake detection – STRICTER MODE
-Threshold = Config.DEEPFAKE_THRESHOLD (default 0.48)
+- Lower threshold (configurable)
+- Additional frequency + texture penalty for deepfakes
+- Real faces with natural texture and frequency pass easily
 """
 
 import logging
@@ -25,7 +27,7 @@ class XceptionDeepfakeDetector:
     def __init__(self, model_path: Optional[str] = None):
         self.model = None
         self.input_size = (299, 299)
-        self.threshold = Config.DEEPFAKE_THRESHOLD   # read from config (now 0.48)
+        self.threshold = Config.DEEPFAKE_THRESHOLD   # expected 0.42 after config change
         logger.info(f"Deepfake detector threshold set to {self.threshold}")
 
         self._load_model_with_fallback(model_path)
@@ -64,6 +66,27 @@ class XceptionDeepfakeDetector:
         normalized = rgb.astype(np.float32) / 255.0
         return np.expand_dims(normalized, axis=0)
 
+    def _frequency_texture_penalty(self, image: np.ndarray) -> float:
+        """Return penalty (0.0 to 0.2) if image shows deepfake-like frequency/texture."""
+        try:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # Frequency std
+            f = np.fft.fft2(gray)
+            fshift = np.fft.fftshift(f)
+            magnitude = 20 * np.log(np.abs(fshift) + 1e-8)
+            freq_std = float(np.std(magnitude))
+            # Texture (Laplacian variance)
+            lap = cv2.Laplacian(gray, cv2.CV_64F)
+            texture_var = float(lap.var())
+            # Deepfakes often have freq_std < 6.5 and texture_var < 30
+            if freq_std < 6.5 and texture_var < 30:
+                return 0.15
+            elif freq_std < 7.0 and texture_var < 40:
+                return 0.08
+            return 0.0
+        except Exception:
+            return 0.0
+
     def detect(self, image: np.ndarray) -> Dict:
         if image is None or image.size == 0:
             return {"is_fake": False, "confidence": 0.0, "score": 0.0, "error": "Invalid image"}
@@ -75,13 +98,23 @@ class XceptionDeepfakeDetector:
             input_tensor = self._preprocess(image)
             prediction = self.model.predict(input_tensor, verbose=0)
             fake_score = float(prediction[0][0])
-            is_fake = fake_score > self.threshold
-            confidence = fake_score if is_fake else (1 - fake_score)
-            logger.info(f"Deepfake detection: score={fake_score:.3f}, is_fake={is_fake}, threshold={self.threshold}")
+            
+            # Apply frequency/texture penalty (makes deepfakes score higher)
+            penalty = self._frequency_texture_penalty(image)
+            boosted_score = min(1.0, fake_score + penalty)
+            
+            is_fake = boosted_score > self.threshold
+            confidence = boosted_score if is_fake else (1 - boosted_score)
+            
+            logger.info(
+                f"Deepfake detection: raw={fake_score:.3f}, penalty={penalty:.2f}, "
+                f"final={boosted_score:.3f}, is_fake={is_fake}, threshold={self.threshold}"
+            )
             return {
                 "is_fake": is_fake,
                 "confidence": round(confidence, 3),
-                "score": round(fake_score, 3),
+                "score": round(boosted_score, 3),
+                "raw_score": round(fake_score, 3),
                 "threshold": self.threshold
             }
         except Exception as e:
@@ -156,13 +189,19 @@ class XceptionDeepfakeDetector:
 
             fake_score = (freq_score * 0.30 + texture_score * 0.30 + noise_score * 0.15 +
                           edge_score * 0.15 + color_score * 0.10)
-            # Use the same threshold as config
-            is_fake = fake_score > self.threshold
-            logger.info(f"Heuristic detection: score={fake_score:.3f}, is_fake={is_fake}, threshold={self.threshold}")
+            # Apply same penalty as model path
+            penalty = self._frequency_texture_penalty(image)
+            boosted_score = min(1.0, fake_score + penalty)
+            is_fake = boosted_score > self.threshold
+            logger.info(
+                f"Heuristic detection: raw={fake_score:.3f}, penalty={penalty:.2f}, "
+                f"final={boosted_score:.3f}, is_fake={is_fake}, threshold={self.threshold}"
+            )
             return {
                 "is_fake": is_fake,
-                "confidence": round(fake_score, 3),
-                "score": round(fake_score, 3),
+                "confidence": round(boosted_score, 3),
+                "score": round(boosted_score, 3),
+                "raw_heuristic": round(fake_score, 3),
                 "heuristic": True,
                 "frequency_std": round(freq_std, 2),
                 "texture_var": round(texture_var, 2),
@@ -190,7 +229,8 @@ class XceptionDeepfakeDetector:
         mean_score = float(np.mean(scores))
         fake_frames = sum(1 for r in frame_results if r.get("is_fake", False))
         fake_ratio = fake_frames / len(frame_results) if frame_results else 0
-        if mean_score > self.threshold or fake_ratio >= 0.4:
+        # Stricter sequence decision: if mean_score > threshold OR any frame has boosted penalty
+        if mean_score > self.threshold or fake_ratio >= 0.3:  # was 0.4
             is_fake = True
             confidence = mean_score
         else:
